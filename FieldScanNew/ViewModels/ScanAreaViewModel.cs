@@ -1,12 +1,18 @@
 ﻿using FieldScanNew.Infrastructure;
+using FieldScanNew.Models; // 需要引用Models
 
 namespace FieldScanNew.ViewModels
 {
-    // 第6个栏目: 扫描区域配置
     public class ScanAreaViewModel : ViewModelBase, IStepViewModel
     {
         public string DisplayName => "6. 扫描区域配置";
 
-        // 未来可以在这里添加扫描点数、与XY校准联动的框选逻辑
+        // **新增**: 持有从项目传入的扫描设置对象的引用
+        public ScanSettings Settings { get; }
+
+        public ScanAreaViewModel(ScanSettings settings)
+        {
+            Settings = settings;
+        }
     }
 }

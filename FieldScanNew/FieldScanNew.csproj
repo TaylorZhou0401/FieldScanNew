@@ -7,20 +7,60 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<UseWindowsForms>true</UseWindowsForms>
-</PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="OxyPlot.Wpf" Version="2.2.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Update="Views\XYCalibView.xaml.cs">
-      <SubType>Code</SubType>
-    </Compile>
-  </ItemGroup>
+		<PlatformTarget>x86</PlatformTarget>
+	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="OxyPlot.Wpf" Version="2.2.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="ClassLibrary_ControlBean">
+			<HintPath>lib\ClassLibrary_ControlBean.dll</HintPath>
+		</Reference>
+		<Reference Include="ControlBeanExDll">
+			<HintPath>lib\ControlBeanExDll.dll</HintPath>
+		</Reference>
+		<Reference Include="Ivi.Visa">
+			<HintPath>lib\Ivi.Visa.dll</HintPath>
+		</Reference>
+		<Reference Include="Keysight.Visa">
+			<HintPath>lib\Keysight.Visa.dll</HintPath>
+		</Reference>
+		<Reference Include="share">
+			<HintPath>lib\share.dll</HintPath>
+		</Reference>
+		<Reference Include="small_scara_interface">
+			<HintPath>lib\small_scara_interface.dll</HintPath>
+		</Reference>
+		<Reference Include="TcpserverExDll">
+			<HintPath>lib\TcpserverExDll.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Page Update="Views\DialogWindow.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 		<Page Update="Views\InputDialog.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\InstrumentSetupView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\ProbeSetupView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\ScanAreaView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\ScanSettingsView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\XYCalibView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+		<Page Update="Views\ZCalibView.xaml">
 			<Generator>MSBuild:Compile</Generator>
 		</Page>
 		<Page Update="MainWindow.xaml">

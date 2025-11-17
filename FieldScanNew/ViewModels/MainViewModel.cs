@@ -120,7 +120,10 @@ namespace FieldScanNew.ViewModels
                 {
                     proj.IsSelected = false;
                 }
-                newProject.IsSelected = true; // 自动选中, 这会触发LoadProjectData和AutoSave
+                newProject.IsSelected = true; // 自动选中
+
+                // **核心修正：立即保存一次，确保 project.json 文件被创建**
+                AutoSaveCurrentProject(newProject);
             }
             catch (Exception ex)
             {

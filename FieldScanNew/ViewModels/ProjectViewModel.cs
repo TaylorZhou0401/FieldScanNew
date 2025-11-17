@@ -47,13 +47,10 @@ namespace FieldScanNew.ViewModels
             AddNewMeasurementCommand = new RelayCommand(ExecuteAddNewMeasurement);
         }
 
-        /// <summary>
-        /// 执行添加新测量项的逻辑
-        /// </summary>
         private void ExecuteAddNewMeasurement(object? parameter)
         {
-            // 创建一个新的测量项，并给一个默认名字
-            var newMeasurement = new MeasurementViewModel($"New Measurement {Measurements.Count + 1}");
+            // **核心修正**：创建测量项时，把对自己的引用(this)传递下去
+            var newMeasurement = new MeasurementViewModel($"New Measurement {Measurements.Count + 1}", this);
             Measurements.Add(newMeasurement);
         }
     }

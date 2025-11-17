@@ -6,27 +6,60 @@
              xmlns:viewmodels="clr-namespace:FieldScanNew.ViewModels"
              mc:Ignorable="d" 
              d:DataContext="{d:DesignInstance Type=viewmodels:InstrumentSetupViewModel}"
-             d:DesignHeight="450" d:DesignWidth="800">
+             d:DesignHeight="450" d:DesignWidth="580">
     <StackPanel Margin="20">
-        <TextBlock Text="仪器设置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+        <GroupBox Header="机械臂控制" Padding="10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="选择型号:" VerticalAlignment="Center" Margin="5"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AvailableRobots}" SelectedItem="{Binding SelectedRobot}" Margin="5"/>
+                </Grid>
+                <TextBlock Margin="5,10,5,5">
+                    <Run Text="状态:"/>
+                    <Run Text="{Binding RobotStatus}" FontWeight="Bold"/>
+                </TextBlock>
+                <StackPanel Orientation="Horizontal" Margin="5">
+                    <Button Content="连接" Width="80" Command="{Binding ConnectRobotCommand}" IsEnabled="{Binding !IsConnecting}"/>
+                    <Button Content="断开" Width="80" Margin="10,0,0,0" Command="{Binding DisconnectRobotCommand}" IsEnabled="{Binding !IsConnecting}"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
 
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="IP 地址:" VerticalAlignment="Center" Margin="5"/>
-            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding InstrumentSettings.IpAddress}" Margin="5"/>
+        <GroupBox Header="测量仪器控制" Padding="10" Margin="0,20,0,0">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                    </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="端口:" VerticalAlignment="Center" Margin="5"/>
-            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding InstrumentSettings.Port}" Margin="5"/>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="选择型号:" VerticalAlignment="Center" Margin="5"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AvailableDevices}" SelectedItem="{Binding SelectedDevice}" Margin="5"/>
 
-        </Grid>
-        <Button Content="连接仪器" Command="{Binding ConnectCommand}" HorizontalAlignment="Left" Margin="5,20,0,0" Padding="10,5"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="IP 地址:" VerticalAlignment="Center" Margin="5"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding InstrumentSettings.IpAddress}" Margin="5"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="端口:" VerticalAlignment="Center" Margin="5"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding InstrumentSettings.Port}" Margin="5"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="状态:" VerticalAlignment="Center" Margin="5"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SaStatus}" FontWeight="Bold" VerticalAlignment="Center" Margin="5"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Margin="5,10,5,5">
+                    <Button Content="连接" Width="80" Command="{Binding ConnectSaCommand}" IsEnabled="{Binding !IsConnecting}"/>
+                    <Button Content="断开" Width="80" Margin="10,0,0,0" Command="{Binding DisconnectSaCommand}" IsEnabled="{Binding !IsConnecting}"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
     </StackPanel>
 </UserControl>

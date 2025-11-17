@@ -170,29 +170,36 @@
                 <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#EAEAEA"/>
 
                 <Grid Grid.Column="2">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="250"/>
-                        </Grid.RowDefinitions>
+                    <DockPanel>
+                        <ToolBar DockPanel.Dock="Top">
+                            <Button Content="▶ 开始扫描" Command="{Binding StartScanCommand}" IsEnabled="{Binding !IsScanning}"/>
+                            <Button Content="■ 停止扫描" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}"/>
+                        </ToolBar>
 
-                        <Grid Grid.Row="0" Margin="10">
-                            <Image Source="{Binding DutImageSource}" Stretch="Uniform" />
-                            <oxy:PlotView Model="{Binding HeatmapModel}" Opacity="0.6"/>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="250"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="10">
+                                <Image Source="{Binding DutImageSource}" Stretch="Uniform" />
+                                <oxy:PlotView Model="{Binding HeatmapModel}" Opacity="0.6"/>
+                            </Grid>
+
+                            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#EAEAEA"/>
+
+                            <TabControl Grid.Row="2" Margin="10">
+                                <TabItem Header="Log">
+                                    <TextBox IsReadOnly="True" VerticalScrollBarVisibility="Auto" Text="{Binding LogOutput}"/>
+                                </TabItem>
+                                <TabItem Header="频谱图">
+                                    <oxy:PlotView Model="{Binding SpectrumModel}"/>
+                                </TabItem>
+                            </TabControl>
                         </Grid>
-
-                        <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#EAEAEA"/>
-
-                        <TabControl Grid.Row="2" Margin="10">
-                            <TabItem Header="Log">
-                                <TextBox IsReadOnly="True" VerticalScrollBarVisibility="Auto" Text="{Binding LogOutput}"/>
-                            </TabItem>
-                            <TabItem Header="频谱图">
-                                <oxy:PlotView Model="{Binding SpectrumModel}"/>
-                            </TabItem>
-                        </TabControl>
-                    </Grid>
+                    </DockPanel>
                 </Grid>
             </Grid>
         </DockPanel>

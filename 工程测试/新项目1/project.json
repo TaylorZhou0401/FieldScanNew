@@ -1,0 +1,24 @@
+{
+  "ProjectName": "\u65B0\u9879\u76EE1",
+  "DutImagePath": null,
+  "ActiveProbeName": null,
+  "InstrumentConfig": {
+    "IpAddress": "192.168.0.22",
+    "Port": 5025,
+    "CenterFrequencyHz": 1000000000,
+    "SpanHz": 100000000,
+    "Points": 1001,
+    "CenterFrequencyUnit": "GHz",
+    "SpanUnit": "MHz",
+    "ReferenceLevelDb": 0
+  },
+  "ScanConfig": {
+    "StartX": 0,
+    "StartY": 0,
+    "StopX": 0,
+    "StopY": 0,
+    "NumX": 0,
+    "NumY": 0,
+    "ScanHeightZ": 0
+  }
+}

@@ -2,6 +2,7 @@
 using FieldScanNew.Views; // 需要引用InputDialog
 using System.Collections.ObjectModel;
 using System.Windows.Input;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
 
 namespace FieldScanNew.ViewModels
 {
@@ -10,23 +11,23 @@ namespace FieldScanNew.ViewModels
         public string DisplayName { get; set; }
         public ObservableCollection<IStepViewModel> Steps { get; }
 
-        // **新增**：用于重命名的命令
         public ICommand RenameCommand { get; }
-        public MeasurementViewModel(string name)
+        public ProjectViewModel ParentProject { get; }
+        public MeasurementViewModel(string name, ProjectViewModel parent)
         {
             DisplayName = name;
-
-            // 初始化重命名命令
+            ParentProject = parent; // **新增**: 保存父级引用
             RenameCommand = new RelayCommand(_ => ExecuteRename());
 
+            // **核心修正**: 创建步骤时，将父级项目中的配置对象传递进去
             Steps = new ObservableCollection<IStepViewModel>
             {
-                new InstrumentSetupViewModel(),
+                new InstrumentSetupViewModel(ParentProject.ProjectData.InstrumentConfig),
                 new ProbeSetupViewModel(),
                 new ScanSettingsViewModel(),
                 new ZCalibViewModel(),
                 new XYCalibViewModel(),
-                new ScanAreaViewModel()
+                new ScanAreaViewModel(ParentProject.ProjectData.ScanConfig) // <-- 传递配置
             };
         }
         private void ExecuteRename()
