@@ -13,13 +13,13 @@
     "ReferenceLevelDb": 0
   },
   "ScanConfig": {
-    "StartX": 225.54245,
-    "StartY": -89.572525,
-    "StopX": 238.370163,
-    "StopY": -35.5636482,
+    "StartX": 189.393539,
+    "StartY": -80.6940079,
+    "StopX": 256.31073,
+    "StopY": -32.5377769,
     "NumX": 10,
     "NumY": 10,
-    "ScanHeightZ": -12.5497999,
+    "ScanHeightZ": -32.5499992,
     "ScanAngleR": -15.1071997
   },
   "MeasurementNames": [
