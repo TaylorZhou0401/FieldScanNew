@@ -17,7 +17,7 @@ namespace FieldScanNew.Services
             if (IsConnected) return;
             await Task.Run(() =>
             {
-                int robotId = 19;
+                int robotId = 82;//机械臂ID
                 TcpserverEx.net_port_initial();
                 Thread.Sleep(3000);
                 _robot = TcpserverEx.get_robot(robotId);

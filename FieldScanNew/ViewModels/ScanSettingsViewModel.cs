@@ -17,17 +17,20 @@ namespace FieldScanNew.ViewModels
                 if (_settings != value)
                 {
                     _settings = value;
-                    // 当底层设置对象改变时（例如加载新项目），通知所有相关属性刷新
                     OnPropertyChanged();
+                    // 刷新所有显示属性
                     OnPropertyChanged(nameof(CenterFreqDisplay));
                     OnPropertyChanged(nameof(SelectedCenterUnit));
                     OnPropertyChanged(nameof(SpanDisplay));
                     OnPropertyChanged(nameof(SelectedSpanUnit));
+                    OnPropertyChanged(nameof(RbwDisplay));
+                    OnPropertyChanged(nameof(SelectedRbwUnit));
+                    OnPropertyChanged(nameof(VbwDisplay));
+                    OnPropertyChanged(nameof(SelectedVbwUnit));
                 }
             }
         }
 
-        // 单位下拉列表数据源
         public List<string> FrequencyUnits { get; } = new List<string> { "Hz", "KHz", "MHz", "GHz" };
 
         public ScanSettingsViewModel(InstrumentSettings settings)
@@ -35,68 +38,75 @@ namespace FieldScanNew.ViewModels
             _settings = settings;
         }
 
-        // 辅助方法：获取单位对应的乘数
         private double GetMultiplier(string unit)
         {
-            return unit switch
-            {
-                "KHz" => 1e3,
-                "MHz" => 1e6,
-                "GHz" => 1e9,
-                _ => 1.0
-            };
+            return unit switch { "KHz" => 1e3, "MHz" => 1e6, "GHz" => 1e9, _ => 1.0 };
         }
 
         // ============ 中心频率 ============
         public double CenterFreqDisplay
         {
             get => _settings.CenterFrequencyHz / GetMultiplier(_settings.CenterFrequencyUnit);
-            set
-            {
-                // 界面输入值 * 单位 = 实际Hz值
-                _settings.CenterFrequencyHz = value * GetMultiplier(_settings.CenterFrequencyUnit);
-                OnPropertyChanged();
-            }
+            set { _settings.CenterFrequencyHz = value * GetMultiplier(_settings.CenterFrequencyUnit); OnPropertyChanged(); }
         }
-
         public string SelectedCenterUnit
         {
             get => _settings.CenterFrequencyUnit;
-            set
-            {
-                if (_settings.CenterFrequencyUnit != value)
-                {
-                    _settings.CenterFrequencyUnit = value;
-                    OnPropertyChanged();
-                    // 单位变了，数值显示也要变 (例如 1000 MHz -> 1 GHz)
-                    OnPropertyChanged(nameof(CenterFreqDisplay));
-                }
-            }
+            set { if (_settings.CenterFrequencyUnit != value) { _settings.CenterFrequencyUnit = value; OnPropertyChanged(); OnPropertyChanged(nameof(CenterFreqDisplay)); } }
         }
 
-        // ============ 频域宽度 (Span) ============
+        // ============ Span ============
         public double SpanDisplay
         {
             get => _settings.SpanHz / GetMultiplier(_settings.SpanUnit);
-            set
-            {
-                _settings.SpanHz = value * GetMultiplier(_settings.SpanUnit);
-                OnPropertyChanged();
-            }
+            set { _settings.SpanHz = value * GetMultiplier(_settings.SpanUnit); OnPropertyChanged(); }
         }
-
         public string SelectedSpanUnit
         {
             get => _settings.SpanUnit;
+            set { if (_settings.SpanUnit != value) { _settings.SpanUnit = value; OnPropertyChanged(); OnPropertyChanged(nameof(SpanDisplay)); } }
+        }
+
+        // ============ RBW (新增) ============
+        public double RbwDisplay
+        {
+            get
+            {
+                if (_settings.RbwHz <= 0) return -1; // Auto
+                return _settings.RbwHz / GetMultiplier(_settings.RbwUnit);
+            }
             set
             {
-                if (_settings.SpanUnit != value)
-                {
-                    _settings.SpanUnit = value;
-                    OnPropertyChanged();
-                    OnPropertyChanged(nameof(SpanDisplay));
-                }
+                if (value <= 0) _settings.RbwHz = -1; // Auto
+                else _settings.RbwHz = value * GetMultiplier(_settings.RbwUnit);
+                OnPropertyChanged();
             }
+        }
+        public string SelectedRbwUnit
+        {
+            get => _settings.RbwUnit;
+            set { if (_settings.RbwUnit != value) { _settings.RbwUnit = value; OnPropertyChanged(); OnPropertyChanged(nameof(RbwDisplay)); } }
+        }
+
+        // ============ VBW (新增) ============
+        public double VbwDisplay
+        {
+            get
+            {
+                if (_settings.VbwHz <= 0) return -1;
+                return _settings.VbwHz / GetMultiplier(_settings.VbwUnit);
+            }
+            set
+            {
+                if (value <= 0) _settings.VbwHz = -1;
+                else _settings.VbwHz = value * GetMultiplier(_settings.VbwUnit);
+                OnPropertyChanged();
+            }
+        }
+        public string SelectedVbwUnit
+        {
+            get => _settings.VbwUnit;
+            set { if (_settings.VbwUnit != value) { _settings.VbwUnit = value; OnPropertyChanged(); OnPropertyChanged(nameof(VbwDisplay)); } }
         }
     }
 }

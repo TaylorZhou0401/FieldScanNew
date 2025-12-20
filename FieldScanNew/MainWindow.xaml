@@ -3,10 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        
         xmlns:oxy="clr-namespace:OxyPlot.Wpf;assembly=OxyPlot.Wpf"
         xmlns:viewmodels="clr-namespace:FieldScanNew.ViewModels"
-        
         mc:Ignorable="d"
         Title="FieldScan Pro" Height="720" Width="1280"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
@@ -86,22 +84,18 @@
                         </StackPanel>
                     </Grid>
 
-                    <TreeView x:Name="TaskTreeView" Margin="5" Background="Transparent" BorderThickness="0"
-                              ItemsSource="{Binding Projects}">
+                    <TreeView x:Name="TaskTreeView" Margin="5" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Projects}">
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem">
                                 <Setter Property="IsExpanded" Value="True"/>
                                 <Setter Property="Padding" Value="2"/>
                             </Style>
                         </TreeView.ItemContainerStyle>
-
                         <TreeView.Resources>
-                            <HierarchicalDataTemplate DataType="{x:Type viewmodels:ProjectViewModel}" 
-                                                      ItemsSource="{Binding Measurements}">
+                            <HierarchicalDataTemplate DataType="{x:Type viewmodels:ProjectViewModel}" ItemsSource="{Binding Measurements}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="Orange"/>
                                     <TextBlock Text="{Binding DisplayName}" FontWeight="Bold"/>
-
                                     <StackPanel.ContextMenu>
                                         <ContextMenu>
                                             <MenuItem Header="新建测量项" Command="{Binding AddNewMeasurementCommand}"/>
@@ -109,9 +103,7 @@
                                     </StackPanel.ContextMenu>
                                 </StackPanel>
                             </HierarchicalDataTemplate>
-
-                            <HierarchicalDataTemplate DataType="{x:Type viewmodels:MeasurementViewModel}"
-                                                      ItemsSource="{Binding Steps}">
+                            <HierarchicalDataTemplate DataType="{x:Type viewmodels:MeasurementViewModel}" ItemsSource="{Binding Steps}">
                                 <TextBlock Text="{Binding DisplayName}">
                                     <TextBlock.ContextMenu>
                                         <ContextMenu>
@@ -120,49 +112,42 @@
                                     </TextBlock.ContextMenu>
                                 </TextBlock>
                             </HierarchicalDataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:InstrumentSetupViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:ProbeSetupViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE771;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:ScanSettingsViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:ZCalibViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE752;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:XYCalibViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE809;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                             <DataTemplate DataType="{x:Type viewmodels:ScanAreaViewModel}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE7B3;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="30,0,5,0" Foreground="DimGray"/>
                                     <TextBlock Text="{Binding DisplayName}"/>
                                 </StackPanel>
                             </DataTemplate>
-
                         </TreeView.Resources>
                     </TreeView>
                 </DockPanel>
@@ -184,8 +169,7 @@
                             </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0" Margin="10">
-                                <Image Source="{Binding DutImageSource}" Stretch="Uniform" />
-                                <oxy:PlotView Model="{Binding HeatmapModel}" Opacity="0.6"/>
+                                <oxy:PlotView Model="{Binding HeatmapModel}" Background="Transparent"/>
                             </Grid>
 
                             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#EAEAEA"/>

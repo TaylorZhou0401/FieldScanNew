@@ -6,18 +6,21 @@
              xmlns:viewmodels="clr-namespace:FieldScanNew.ViewModels"
              mc:Ignorable="d" 
              d:DataContext="{d:DesignInstance Type=viewmodels:ScanSettingsViewModel}"
-             d:DesignHeight="450" d:DesignWidth="800">
-    <StackPanel Margin="20">
-        <TextBlock Text="频谱仪参数配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
+             d:DesignHeight="550" d:DesignWidth="800">
 
-        <GroupBox Header="频率参数" Padding="10">
+    <StackPanel Margin="20">
+        <TextBlock Text="频谱仪高级参数配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
+
+        <GroupBox Header="频率与带宽" Padding="10">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" MinWidth="120"/>
+                    <ColumnDefinition Width="Auto" MinWidth="140"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -31,15 +34,23 @@
                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SpanDisplay}" Margin="5"/>
                 <ComboBox Grid.Row="1" Grid.Column="2" ItemsSource="{Binding FrequencyUnits}" SelectedItem="{Binding SelectedSpanUnit}" Width="70" Margin="5"/>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="扫描点数 (Points):" VerticalAlignment="Center" Margin="5"/>
-                <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Settings.Points}" Margin="5"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="分辨率带宽 (RBW):" VerticalAlignment="Center" Margin="5"/>
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding RbwDisplay}" Margin="5" ToolTip="输入 -1 或 0 代表自动 (Auto)"/>
+                <ComboBox Grid.Row="2" Grid.Column="2" ItemsSource="{Binding FrequencyUnits}" SelectedItem="{Binding SelectedRbwUnit}" Width="70" Margin="5"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="视频带宽 (VBW):" VerticalAlignment="Center" Margin="5"/>
+                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding VbwDisplay}" Margin="5" ToolTip="输入 -1 或 0 代表自动 (Auto)"/>
+                <ComboBox Grid.Row="3" Grid.Column="2" ItemsSource="{Binding FrequencyUnits}" SelectedItem="{Binding SelectedVbwUnit}" Width="70" Margin="5"/>
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="扫描点数 (Points):" VerticalAlignment="Center" Margin="5"/>
+                <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Settings.Points}" Margin="5"/>
             </Grid>
         </GroupBox>
 
         <GroupBox Header="幅度参数" Padding="10" Margin="0,15,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" MinWidth="120"/>
+                    <ColumnDefinition Width="Auto" MinWidth="140"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 

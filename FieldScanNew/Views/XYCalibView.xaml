@@ -19,6 +19,7 @@
 
         <ScrollViewer Grid.Column="0" Margin="0,0,20,0" VerticalScrollBarVisibility="Auto">
             <StackPanel>
+
                 <GroupBox Header="1. 图像采集" Padding="10">
                     <StackPanel>
                         <ComboBox ItemsSource="{Binding CameraList}" SelectedIndex="{Binding SelectedCameraIndex}" Margin="0,0,0,10"/>
@@ -36,7 +37,7 @@
                                                 <Setter.Value>
                                                     <StackPanel Orientation="Horizontal">
                                                         <Button Content="❌ 关闭" Command="{Binding ToggleCameraCommand}" Width="80" Background="#FFCCCC" Margin="0,0,10,0" Height="30"/>
-                                                        <Button Content="✅ 拍照" Command="{Binding CaptureCommand}" Width="120" FontWeight="Bold" Background="#CCFFCC" Height="30"/>
+                                                        <Button Content="✅ 拍照 (更新底图)" Command="{Binding CaptureCommand}" Width="120" FontWeight="Bold" Background="#CCFFCC" Height="30"/>
                                                     </StackPanel>
                                                 </Setter.Value>
                                             </Setter>
@@ -52,7 +53,7 @@
                     <StackPanel>
                         <Button Content="{Binding DragButtonText}" Command="{Binding ToggleDragCommand}" Background="{Binding DragButtonColor}" 
                                 FontSize="14" FontWeight="Bold" Height="40" Margin="0,0,0,15"
-                                ToolTip="开启后手动拖动XY。如需调整Z轴，直接点击下方Z按钮，会自动锁止并移动。"/>
+                                ToolTip="开启后手动拖动XY。如需调整Z轴，直接点击下方Z按钮。"/>
 
                         <Grid Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
@@ -77,7 +78,6 @@
                                 <ColumnDefinition Width="20"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-
                             <Grid Grid.Column="0">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -94,9 +94,7 @@
                                 <Button Grid.Row="1" Grid.Column="2" Content="X+" Width="50" Height="40" Margin="2" Command="{Binding JogCommand}" CommandParameter="X+"/>
                                 <Button Grid.Row="2" Grid.Column="1" Content="Y-" Width="50" Height="40" Margin="2" Command="{Binding JogCommand}" CommandParameter="Y-"/>
                             </Grid>
-
                             <Border Grid.Column="1" Width="1" Background="#EEE" Margin="10,0"/>
-
                             <Grid Grid.Column="2">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -126,13 +124,11 @@
                 <GroupBox Header="3. 坐标记录" Padding="10">
                     <StackPanel>
                         <Button Content="↺ 重新选点" Command="{Binding ResetCommand}" Margin="0,0,0,10"/>
-
                         <Border BorderBrush="#DDD" BorderThickness="1" Padding="5" Margin="0,0,0,10" Background="#F9F9F9">
                             <StackPanel>
                                 <DockPanel LastChildFill="False">
                                     <TextBlock Text="特征点 1" FontWeight="Bold" VerticalAlignment="Center"/>
-                                    <Button DockPanel.Dock="Right" Content="📍 读取坐标" FontSize="11" Padding="5,2" 
-                                            Command="{Binding ReadRobotPosCommand}" CommandParameter="1"/>
+                                    <Button DockPanel.Dock="Right" Content="📍 读取坐标" FontSize="11" Padding="5,2" Command="{Binding ReadRobotPosCommand}" CommandParameter="1"/>
                                 </DockPanel>
                                 <TextBlock Text="{Binding PixelP1Text}" Foreground="Gray" FontSize="11" Margin="0,2,0,5"/>
                                 <Grid>
@@ -151,13 +147,11 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
-
                         <Border BorderBrush="#DDD" BorderThickness="1" Padding="5" Margin="0,0,0,15" Background="#F9F9F9">
                             <StackPanel>
                                 <DockPanel LastChildFill="False">
                                     <TextBlock Text="特征点 2" FontWeight="Bold" VerticalAlignment="Center"/>
-                                    <Button DockPanel.Dock="Right" Content="📍 读取坐标" FontSize="11" Padding="5,2" 
-                                            Command="{Binding ReadRobotPosCommand}" CommandParameter="2"/>
+                                    <Button DockPanel.Dock="Right" Content="📍 读取坐标" FontSize="11" Padding="5,2" Command="{Binding ReadRobotPosCommand}" CommandParameter="2"/>
                                 </DockPanel>
                                 <TextBlock Text="{Binding PixelP2Text}" Foreground="Gray" FontSize="11" Margin="0,2,0,5"/>
                                 <Grid>
@@ -176,152 +170,84 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
-
                         <Button Content="⚡ 计算校准参数" Command="{Binding CalibrateCommand}" Height="40" FontSize="14" FontWeight="Bold" Background="#E0F7FA"/>
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Background="#333" ClipToBounds="True">
-            <Grid>
-                <Viewbox Stretch="Uniform">
-                    <Grid>
-                        <Image x:Name="StaticImage" Source="{Binding DutImageSource}" 
-                               MouseLeftButtonDown="Image_MouseLeftButtonDown" Cursor="Cross">
-                            <Image.Style>
-                                <Style TargetType="Image">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCameraMode}" Value="True">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding DutImageSource}" Value="{x:Null}">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Image.Style>
-                        </Image>
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="5"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
-                        <Image Source="{Binding CameraPreviewSource}" IsHitTestVisible="False">
-                            <Image.Style>
-                                <Style TargetType="Image">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCameraMode}" Value="True">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Image.Style>
-                        </Image>
+            <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1" Background="#333" ClipToBounds="True">
+                <Grid>
+                    <Viewbox Stretch="Uniform">
+                        <Grid>
+                            <Image x:Name="StaticImage" Source="{Binding DutImageSource}" 
+                                   MouseLeftButtonDown="Image_MouseLeftButtonDown" Cursor="Cross"/>
 
-                        <Grid IsHitTestVisible="False">
-                            <Grid.Style>
-                                <Style TargetType="Grid">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCameraMode}" Value="True">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Grid.Style>
-                            <Rectangle VerticalAlignment="Center" Height="1" Fill="#00FF00" Opacity="0.8"/>
-                            <Rectangle HorizontalAlignment="Center" Width="1" Fill="#00FF00" Opacity="0.8"/>
-                            <Ellipse HorizontalAlignment="Center" VerticalAlignment="Center" Width="40" Height="40" Stroke="#00FF00" StrokeThickness="1" Opacity="0.8"/>
-                            <Ellipse HorizontalAlignment="Center" VerticalAlignment="Center" Width="4" Height="4" Fill="#00FF00" Opacity="0.8"/>
+                            <Canvas IsHitTestVisible="False" Width="{Binding DutImageSource.PixelWidth}" Height="{Binding DutImageSource.PixelHeight}">
+                                <Ellipse Width="10" Height="10" Fill="Red" Stroke="White" StrokeThickness="1"
+                                         Canvas.Left="{Binding P1Left}" Canvas.Top="{Binding P1Top}"
+                                         Visibility="{Binding ShowP1, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock Text="P1" Canvas.Left="{Binding P1Left}" Canvas.Top="{Binding P1Top}" Foreground="Red" FontWeight="Bold" FontSize="20" Margin="10,-20,0,0"
+                                           Visibility="{Binding ShowP1, Converter={StaticResource BoolToVis}}"/>
+
+                                <Ellipse Width="10" Height="10" Fill="Blue" Stroke="White" StrokeThickness="1"
+                                         Canvas.Left="{Binding P2Left}" Canvas.Top="{Binding P2Top}"
+                                         Visibility="{Binding ShowP2, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock Text="P2" Canvas.Left="{Binding P2Left}" Canvas.Top="{Binding P2Top}" Foreground="Blue" FontWeight="Bold" FontSize="20" Margin="10,-20,0,0"
+                                           Visibility="{Binding ShowP2, Converter={StaticResource BoolToVis}}"/>
+                            </Canvas>
                         </Grid>
+                    </Viewbox>
 
-                        <Canvas IsHitTestVisible="False" Width="{Binding DutImageSource.PixelWidth}" Height="{Binding DutImageSource.PixelHeight}">
-                            <Canvas.Style>
-                                <Style TargetType="Canvas">
-                                    <Setter Property="Visibility" Value="Visible"/>
+                    <TextBlock Text="等待拍照..." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#DDD" FontSize="24" IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DutImageSource}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#EAEAEA"/>
+
+            <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Background="#111">
+                <Grid>
+                    <Image Source="{Binding CameraPreviewSource}" Stretch="Uniform"/>
+
+                    <Grid IsHitTestVisible="False">
+                        <Rectangle VerticalAlignment="Center" Height="1" Fill="#00FF00" Opacity="0.8"/>
+                        <Rectangle HorizontalAlignment="Center" Width="1" Fill="#00FF00" Opacity="0.8"/>
+                        <Ellipse HorizontalAlignment="Center" VerticalAlignment="Center" Width="40" Height="40" Stroke="#00FF00" StrokeThickness="1" Opacity="0.8"/>
+                        <Ellipse HorizontalAlignment="Center" VerticalAlignment="Center" Width="4" Height="4" Fill="#00FF00" Opacity="0.8"/>
+
+                        <TextBlock Text="摄像头已关闭 (点击上方打开)" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#555" FontSize="18">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCameraMode}" Value="True">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding DutImageSource}" Value="{x:Null}">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        <DataTrigger Binding="{Binding IsCameraMode}" Value="False">
+                                            <Setter Property="Visibility" Value="Visible"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
-                            </Canvas.Style>
-
-                            <Ellipse Width="10" Height="10" Fill="Red" Stroke="White" StrokeThickness="1"
-                                     Canvas.Left="{Binding P1Left}" Canvas.Top="{Binding P1Top}">
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding ShowP1}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Text="P1" Canvas.Left="{Binding P1Left}" Canvas.Top="{Binding P1Top}" Foreground="Red" FontWeight="Bold" FontSize="20" Margin="10,-20,0,0">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding ShowP1}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-
-                            <Ellipse Width="10" Height="10" Fill="Blue" Stroke="White" StrokeThickness="1"
-                                     Canvas.Left="{Binding P2Left}" Canvas.Top="{Binding P2Top}">
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding ShowP2}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Text="P2" Canvas.Left="{Binding P2Left}" Canvas.Top="{Binding P2Top}" Foreground="Blue" FontWeight="Bold" FontSize="20" Margin="10,-20,0,0">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding ShowP2}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </Canvas>
-
+                            </TextBlock.Style>
+                        </TextBlock>
                     </Grid>
-                </Viewbox>
-
-                <TextBlock Text="请打开摄像头拍摄图片" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#DDD" FontSize="24" IsHitTestVisible="False">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding DutImageSource}" Value="{x:Null}"/>
-                                        <Condition Binding="{Binding IsCameraMode}" Value="False"/>
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </MultiDataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-            </Grid>
-        </Border>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>
