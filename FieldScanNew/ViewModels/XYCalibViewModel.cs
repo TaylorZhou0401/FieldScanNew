@@ -138,12 +138,13 @@ namespace FieldScanNew.ViewModels
             }
 
             float x = 0, y = 0, z = 0, r = 0;
+            //修正：基于使用者视角调节步进方向
             switch (direction)
             {
-                case "X+": x = JogStep; break;
-                case "X-": x = -JogStep; break;
-                case "Y+": y = JogStep; break;
-                case "Y-": y = -JogStep; break;
+                case "X+": x = -JogStep; break;
+                case "X-": x = JogStep; break;
+                case "Y+": y = -JogStep; break;
+                case "Y-": y = JogStep; break;
                 case "Z+": z = JogStep; break;
                 case "Z-": z = -JogStep; break;
                 case "R+": r = AngleStep; break;

@@ -158,6 +158,7 @@
                     <DockPanel>
                         <ToolBar DockPanel.Dock="Top">
                             <Button Content="▶ 开始扫描" Command="{Binding StartScanCommand}" IsEnabled="{Binding !IsScanning}"/>
+                            <Button Content="▶ QBC扫描" Command="{Binding QBCStartScanCommand}" IsEnabled="{Binding !IsScanning}"/>
                             <Button Content="■ 停止扫描" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}"/>
                         </ToolBar>
 
