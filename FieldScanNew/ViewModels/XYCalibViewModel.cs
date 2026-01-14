@@ -78,7 +78,8 @@ namespace FieldScanNew.ViewModels
             _projectData = projectData;
             _projectFolderPath = projectFolderPath;
             _hardwareService = HardwareService.Instance;
-            _cameraService = new CameraService();
+            // 修改这里：使用单例而不是 new
+            _cameraService = CameraService.Instance;
             CameraList = new ObservableCollection<string>(_cameraService.GetCameraList());
             if (CameraList.Count > 0) SelectedCameraIndex = 0;
 
