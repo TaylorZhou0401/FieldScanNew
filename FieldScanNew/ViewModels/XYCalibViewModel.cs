@@ -258,6 +258,11 @@ namespace FieldScanNew.ViewModels
 
             _projectData.IsCalibrated = true;
 
+            //关闭摄像头，避免占用新项目摄像资源
+            _cameraService.StopCamera();
+            CameraPreviewSource = null;
+            IsCameraMode = false;
+
             // 提示校准成功
             MessageBox.Show(
                 $"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): {_projectData.ScanConfig.ScanAngleR:F2} °\n旋转角度： {standardAngle} °",
@@ -311,8 +316,57 @@ namespace FieldScanNew.ViewModels
             }
         }
 
-        private void SaveCaptureToFile(BitmapSource image) { try { string imagesFolder = System.IO.Path.Combine(_projectFolderPath, "Images"); if (!System.IO.Directory.Exists(imagesFolder)) System.IO.Directory.CreateDirectory(imagesFolder); string fileName = $"Capture_{DateTime.Now:yyyyMMdd_HHmmss}.jpg"; string fullPath = System.IO.Path.Combine(imagesFolder, fileName); var encoder = new JpegBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); using (var stream = new System.IO.FileStream(fullPath, System.IO.FileMode.Create)) { encoder.Save(stream); } _projectData.DutImagePath = fullPath; } catch (Exception ex) { MessageBox.Show($"保存图片失败: {ex.Message}", "错误"); } }
-        private void LoadImageFromPath(string path) { try { var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(path); bitmap.EndInit(); bitmap.Freeze(); DutImageSource = bitmap; } catch { } }
-        ~XYCalibViewModel() { _cameraService.StopCamera(); }
+        private void SaveCaptureToFile(BitmapSource image)
+        {
+            try
+            {
+                string imagesFolder = System.IO.Path.Combine(_projectFolderPath, "Images");
+                if (!System.IO.Directory.Exists(imagesFolder))
+                {
+                    System.IO.Directory.CreateDirectory(imagesFolder);
+                }
+
+                string fileName = $"Capture_{DateTime.Now:yyyyMMdd_HHmmss}.jpg";
+                string fullPath = System.IO.Path.Combine(imagesFolder, fileName);
+
+                var encoder = new JpegBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(image));
+
+                using (var stream = new System.IO.FileStream(fullPath, System.IO.FileMode.Create))
+                {
+                    encoder.Save(stream);
+                }
+
+                _projectData.DutImagePath = fullPath;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"保存图片失败: {ex.Message}", "错误");
+            }
+        }
+
+        private void LoadImageFromPath(string path)
+        {
+            try
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(path);
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                DutImageSource = bitmap;
+            }
+            catch
+            {
+                // 忽略加载失败的情况（原代码无处理）
+            }
+        }
+
+        ～XYCalibViewModel()
+        {
+            _cameraService.StopCamera();
+        }
     }
 }

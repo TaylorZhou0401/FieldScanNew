@@ -1,5 +1,5 @@
 ﻿using FieldScanNew.Infrastructure;
-using FieldScanNew.Models;
+using FieldScanNew.Models; 
 using FieldScanNew.Services;
 using FieldScanNew.Views;
 using MathNet.Numerics;
@@ -578,7 +578,6 @@ namespace FieldScanNew.ViewModels
                 double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
                 double yMin = Math.Min(scanSettings.StartY, scanSettings.StopY);
                 double yMax = Math.Max(scanSettings.StartY, scanSettings.StopY);
-
                 var heatMapData = new double[scanSettings.NumX, scanSettings.NumY];
                 var heatMapSeries = new HeatMapSeries
                 {
@@ -602,16 +601,42 @@ namespace FieldScanNew.ViewModels
                 var sbFull = new StringBuilder(); bool isFullHeaderWritten = false;
 
                 //核心扫描循环
+                // 预计算，减小循环内计算量
+                int numX = scanSettings.NumX;
+                int numY = scanSettings.NumY;
+                int numX_1 = numX - 1; // 预计算：避免循环内反复 numX-1
+                int numY_1 = numY - 1; // 预计算：避免循环内反复 numY-1
+                float xStepPhys = (scanSettings.StopX - scanSettings.StartX) / (float)numX_1; // X轴物理步长
+                float yStepPhys = (scanSettings.StopY - scanSettings.StartY) / (float)numY_1; // Y轴物理步长
+                                                                                              // 2. 预计算正方形范围比例系数（替代循环内重复计算）
+                double xRange = xMax - xMin;
+                double yRange = yMax - yMin;
+                double ratioX_Coeff = numX_1 / xRange; // 预计算：ratioX * numX_1 = (targetX-xMin)*ratioX_Coeff
+                double ratioY_Coeff = numY_1 / yRange; // 预计算：ratioY * numY_1 = (targetY-yMin)*ratioY_Coeff
+
+                int rotateAngle = (int)(selectedProject?.ProjectData.RotateAngle ?? 0);
+                int xStart, xEnd, xStep;
+                int yStart, yEnd, yStep;
+                (bool reverseX, bool reverseY) rotateRule = rotateAngle switch
+                {
+                    90 => (true, false),
+                    180 => (true, true),
+                    270 => (false, true),
+                    _ => (false, false) // 0度/默认
+                };
+                bool reverseX = rotateRule.reverseX;
+                bool reverseY = rotateRule.reverseY;
 
                 for (int j = 0; j < scanSettings.NumY; j++)
                 {
+                    // 预计算当前Y的物理坐标（提至内层循环外，减少计算次数）
+                    float targetY = scanSettings.StartY + j * yStepPhys;
                     for (int i = 0; i < scanSettings.NumX; i++)
                     {
                         if (_cancellationTokenSource.Token.IsCancellationRequested) { MessageBox.Show("扫描已停止。", "提示"); IsScanning = false; return; }
 
                         //步骤2：计算当前点位的目标坐标
-                        float targetX = scanSettings.StartX + i * (scanSettings.StopX - scanSettings.StartX) / (scanSettings.NumX - 1);
-                        float targetY = scanSettings.StartY + j * (scanSettings.StopY - scanSettings.StartY) / (scanSettings.NumY - 1);
+                        float targetX = scanSettings.StartX + i * xStepPhys;
 
                         //步骤3：移动机械臂到目标点位
                         await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, scanSettings.ScanAngleR);
@@ -622,15 +647,18 @@ namespace FieldScanNew.ViewModels
                         if (traceData.Length > 0)
                         {
                             double maxVal = traceData.Max();
-                            double ratioX = (targetX - xMin) / (xMax - xMin);
-                            double ratioY = (targetY - yMin) / (yMax - yMin);
-                            int arrayX = (int)Math.Round(ratioX * (scanSettings.NumX - 1));
-                            int arrayY = (int)Math.Round(ratioY * (scanSettings.NumY - 1));
-                            arrayX = Math.Max(0, Math.Min(arrayX, scanSettings.NumX - 1));
-                            arrayY = Math.Max(0, Math.Min(arrayY, scanSettings.NumY - 1));
+                            double rawArrayX = (targetX - xMin) * ratioX_Coeff;
+                            double rawArrayY = (targetY - yMin) * ratioY_Coeff;
+                            int arrayX = (int)Math.Round(reverseX ? numX_1 - rawArrayX : rawArrayX);
+                            int arrayY = (int)Math.Round(reverseY ? numY_1 - rawArrayY : rawArrayY);
+
+                            // 边界保护（精简写法）
+                            arrayX = Math.Max(0, Math.Min(arrayX, numX_1));
+                            arrayY = Math.Max(0, Math.Min(arrayY, numY_1));
 
                             heatMapData[arrayX, arrayY] = maxVal;
                             HeatmapModel.InvalidatePlot(true);
+                            
 
                             spectrumSeries.Points.Clear();
                             for (int k = 0; k < traceData.Length; k++) spectrumSeries.Points.Add(new DataPoint(k, traceData[k]));
@@ -768,7 +796,6 @@ namespace FieldScanNew.ViewModels
                             IsScanning = false;
                             return;
                         }
-
                         int xIndex = col * xStepIndex;
                         xIndex = Math.Min(xIndex, scanSettings.NumX - 1);
                         // 计算初始点X坐标
