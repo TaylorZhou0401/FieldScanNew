@@ -53,22 +53,42 @@ namespace FieldScanNew.ViewModels
         public ObservableCollection<ProjectViewModel> Projects { get; }
         private BitmapSource? _dutImageSource;
         public BitmapSource? DutImageSource { get => _dutImageSource; set { _dutImageSource = value; OnPropertyChanged(); UpdatePlotBackground(); } }
+
         private IStepViewModel? _selectedStep;
         public IStepViewModel? SelectedStep
         {
             get => _selectedStep;
             set
             {
+                // 这里依然保留，用于处理正常的选中变化
                 if (Equals(value, _selectedStep)) return;
                 _selectedStep = value;
                 OnPropertyChanged();
-                if (_selectedStep != null && !(_selectedStep is ProjectViewModel) && !(_selectedStep is MeasurementViewModel))
+
+                if (_selectedStep != null)
                 {
-                    _dialogService.ShowDialog(_selectedStep);
-                    LoadDutImage();
+                    TriggerStepDialog(_selectedStep);
                 }
             }
         }
+
+        // 新增一个专门触发弹窗的方法
+        public void TriggerStepDialog(IStepViewModel step)
+        {
+            // 过滤掉不需要弹窗的类型
+            if (step == null || step is ProjectViewModel || step is MeasurementViewModel)
+                return;
+
+            // 执行弹窗
+            _dialogService.ShowDialog(step);
+            LoadDutImage();
+
+            // 关键：弹窗结束后，清空当前选中，确保下次点击同一项时 SelectedStep 能够再次发生“变化”
+            _selectedStep = null;
+            OnPropertyChanged(nameof(SelectedStep));
+        }
+
+
         private ScanSettings _currentScanSettings;
         public ScanSettings CurrentScanSettings
         {

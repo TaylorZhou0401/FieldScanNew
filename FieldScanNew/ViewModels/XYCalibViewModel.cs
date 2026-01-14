@@ -249,6 +249,11 @@ namespace FieldScanNew.ViewModels
             _projectData.OffsetY = offsetY;
             _projectData.IsCalibrated = true;
 
+            // 关键：校准成功后一定要彻底释放资源
+            _cameraService.StopCamera();
+            CameraPreviewSource = null;
+            IsCameraMode = false;
+
             // 提示校准成功
             MessageBox.Show(
                 $"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): {_projectData.ScanConfig.ScanAngleR:F2} °",
