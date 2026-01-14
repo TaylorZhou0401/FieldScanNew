@@ -2,25 +2,34 @@
 using FieldScanNew.Models;
 using FieldScanNew.Services;
 using FieldScanNew.Views;
+using MathNet.Numerics;
+using MathNet.Numerics.LinearAlgebra;
+using MathNet.Numerics.LinearAlgebra.Double;
+using Microsoft.Win32;
+using Newtonsoft.Json; // 需要添加
+using Newtonsoft.Json.Linq; // 需要自行添加
 using OxyPlot;
+using OxyPlot.Annotations;
 using OxyPlot.Axes;
 using OxyPlot.Series;
-using OxyPlot.Annotations;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-
-using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using MessageBox = System.Windows.MessageBox;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
@@ -158,13 +167,332 @@ namespace FieldScanNew.ViewModels
 
         // ... (LoadDutImage, UpdatePlotBackground, OnSettingsChanged... 保持不变，为了节省篇幅已省略) ...
         // 请务必保留您原文件中的这些辅助方法
-        private void LoadDutImage() { var project = Projects.FirstOrDefault(p => p.IsSelected); if (project != null && !string.IsNullOrEmpty(project.ProjectData.DutImagePath) && File.Exists(project.ProjectData.DutImagePath)) { try { var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(project.ProjectData.DutImagePath); bitmap.EndInit(); bitmap.Freeze(); DutImageSource = bitmap; } catch { DutImageSource = null; } } else { DutImageSource = null; } }
-        private void UpdatePlotBackground() { HeatmapModel.Annotations.Clear(); if (DutImageSource == null) { HeatmapModel.InvalidatePlot(true); return; } var project = Projects.FirstOrDefault(p => p.IsSelected); double xMin, xMax, yMin, yMax; BitmapSource displayBitmap = DutImageSource; if (project == null || !project.ProjectData.IsCalibrated) { xMin = 0; xMax = DutImageSource.PixelWidth; yMin = 0; yMax = DutImageSource.PixelHeight; } else { var pd = project.ProjectData; double pixW = DutImageSource.PixelWidth; double pixH = DutImageSource.PixelHeight; double physX_Left = pd.OffsetX; double physX_Right = pixW * pd.MatrixM11 + pd.OffsetX; double physY_Top = pd.OffsetY; double physY_Bottom = pixH * pd.MatrixM22 + pd.OffsetY; xMin = Math.Min(physX_Left, physX_Right); xMax = Math.Max(physX_Left, physX_Right); yMin = Math.Min(physY_Top, physY_Bottom); yMax = Math.Max(physY_Top, physY_Bottom); bool flipX = pd.MatrixM11 < 0; bool flipY = pd.MatrixM22 > 0; if (flipX || flipY) { try { var transformGroup = new TransformGroup(); transformGroup.Children.Add(new ScaleTransform(flipX ? -1 : 1, flipY ? -1 : 1)); double tx = flipX ? pixW : 0; double ty = flipY ? pixH : 0; transformGroup.Children.Add(new TranslateTransform(tx, ty)); displayBitmap = new TransformedBitmap(DutImageSource, new MatrixTransform(flipX ? -1 : 1, 0, 0, flipY ? -1 : 1, tx, ty)); } catch { displayBitmap = DutImageSource; } } } try { using (var stream = new MemoryStream()) { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(displayBitmap)); encoder.Save(stream); var imageAnnotation = new ImageAnnotation { ImageSource = new OxyImage(stream.ToArray()), X = new PlotLength((xMin + xMax) / 2, PlotLengthUnit.Data), Y = new PlotLength((yMin + yMax) / 2, PlotLengthUnit.Data), Width = new PlotLength(xMax - xMin, PlotLengthUnit.Data), Height = new PlotLength(yMax - yMin, PlotLengthUnit.Data), Layer = AnnotationLayer.BelowSeries, Interpolate = true }; HeatmapModel.Annotations.Add(imageAnnotation); } } catch (Exception ex) { Console.WriteLine("BG Error: " + ex.Message); } HeatmapModel.ResetAllAxes(); HeatmapModel.InvalidatePlot(true); }
-        private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e) { var selectedProject = Projects.FirstOrDefault(p => p.IsSelected); if (selectedProject != null) AutoSaveCurrentProject(selectedProject); }
-        private void ExecuteAddNewProject(object? parameter) { try { var inputDialog = new InputDialog("请输入新项目的名称:", "新项目"); if (inputDialog.ShowDialog() != true) return; string projectName = inputDialog.Answer; if (string.IsNullOrWhiteSpace(projectName)) return; var folderDialog = new System.Windows.Forms.FolderBrowserDialog { Description = "请选择项目的存放路径" }; if (folderDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return; string projectPath = Path.Combine(folderDialog.SelectedPath, projectName); if (Directory.Exists(projectPath)) { MessageBox.Show("同名项目文件夹已存在！", "错误"); return; } Directory.CreateDirectory(projectPath); var newProject = new ProjectViewModel(projectName, projectPath, this); Projects.Add(newProject); foreach (var proj in Projects.Where(p => p != newProject)) proj.IsSelected = false; newProject.IsSelected = true; LoadProjectDataIntoViewModel(newProject); AutoSaveCurrentProject(newProject); } catch (Exception ex) { MessageBox.Show("创建新项目时发生严重错误: " + ex.Message, "错误"); } }
-        private void ExecuteLoadProject(object? parameter) { try { var openFileDialog = new OpenFileDialog { Filter = "项目文件 (*.json)|*.json" }; if (openFileDialog.ShowDialog() == true) { string filePath = openFileDialog.FileName; string fileContent = File.ReadAllText(filePath); if (string.IsNullOrWhiteSpace(fileContent)) { MessageBox.Show("项目文件为空或已损坏。", "错误"); return; } var projectData = System.Text.Json.JsonSerializer.Deserialize<ProjectData>(fileContent); if (projectData == null) { MessageBox.Show("无法解析项目文件。", "错误"); return; } string projectFolder = Path.GetDirectoryName(filePath) ?? string.Empty; if (string.IsNullOrEmpty(projectFolder)) { MessageBox.Show("无法获取项目文件夹路径。", "错误"); return; } var loadedProject = new ProjectViewModel(projectData.ProjectName, projectFolder, this) { ProjectData = projectData }; if (projectData.MeasurementNames != null) { foreach (var name in projectData.MeasurementNames) loadedProject.Measurements.Add(new MeasurementViewModel(name, loadedProject)); } Projects.Add(loadedProject); foreach (var proj in Projects.Where(p => p != loadedProject)) proj.IsSelected = false; loadedProject.IsSelected = true; LoadProjectDataIntoViewModel(loadedProject); } } catch (Exception ex) { MessageBox.Show("加载项目时发生严重错误: " + ex.Message, "错误"); } }
-        public void AutoSaveCurrentProject(ProjectViewModel project) { if (project?.ProjectData == null) return; project.ProjectData.ScanConfig = this.CurrentScanSettings; project.ProjectData.InstrumentConfig = this.CurrentInstrumentSettings; project.ProjectData.MeasurementNames = project.Measurements.Select(m => m.DisplayName).ToList(); try { string filePath = Path.Combine(project.ProjectFolderPath, "project.json"); var options = new JsonSerializerOptions { WriteIndented = true }; string jsonString = System.Text.Json.JsonSerializer.Serialize(project.ProjectData, options); File.WriteAllText(filePath, jsonString); } catch (Exception ex) { Console.WriteLine($"自动保存失败: {ex.Message}"); } }
+        /// <summary>
+        /// 加载被测设备(DUT)的图片
+        /// </summary>
+        private void LoadDutImage()
+        {
+            // 获取当前选中的项目
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
 
+            // 验证项目和图片路径有效性
+            if (selectedProject != null
+                && !string.IsNullOrEmpty(selectedProject.ProjectData.DutImagePath)
+                && File.Exists(selectedProject.ProjectData.DutImagePath))
+            {
+                try
+                {
+                    // 创建并初始化位图对象
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.UriSource = new Uri(selectedProject.ProjectData.DutImagePath);
+                    bitmap.EndInit();
+                    bitmap.Freeze();
+
+                    // 赋值到图片源属性
+                    DutImageSource = bitmap;
+                }
+                catch
+                {
+                    // 加载失败时清空图片源
+                    DutImageSource = null;
+                }
+            }
+            else
+            {
+                // 无有效项目或路径时清空图片源
+                DutImageSource = null;
+            }
+        }
+
+        /// <summary>
+        /// 更新热力图背景图片
+        /// </summary>
+        private void UpdatePlotBackground()
+        {
+            // 清空现有注释
+            HeatmapModel.Annotations.Clear();
+
+            // 无图片源时直接刷新并返回
+            if (DutImageSource == null)
+            {
+                HeatmapModel.InvalidatePlot(true);
+                return;
+            }
+
+            // 获取当前选中的项目
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
+
+            double xMin, xMax, yMin, yMax;
+            BitmapSource displayBitmap = DutImageSource;
+
+            // 未校准状态下使用图片原始像素尺寸
+            if (selectedProject == null || !selectedProject.ProjectData.IsCalibrated)
+            {
+                xMin = 0;
+                xMax = DutImageSource.PixelWidth;
+                yMin = 0;
+                yMax = DutImageSource.PixelHeight;
+            }
+            else
+            {
+                // 获取校准参数
+                var projectData = selectedProject.ProjectData;
+                double pixelWidth = DutImageSource.PixelWidth;
+                double pixelHeight = DutImageSource.PixelHeight;
+
+                // 计算物理坐标范围
+                double physicalX_Left = projectData.OffsetX;
+                double physicalX_Right = pixelWidth * projectData.MatrixM11 + projectData.OffsetX;
+                double physicalY_Top = projectData.OffsetY;
+                double physicalY_Bottom = pixelHeight * projectData.MatrixM22 + projectData.OffsetY;
+
+                // 确定坐标极值
+                xMin = Math.Min(physicalX_Left, physicalX_Right);
+                xMax = Math.Max(physicalX_Left, physicalX_Right);
+                yMin = Math.Min(physicalY_Top, physicalY_Bottom);
+                yMax = Math.Max(physicalY_Top, physicalY_Bottom);
+
+                // 判断是否需要翻转X/Y轴
+                /*bool flipX = projectData.MatrixM11 < 0;
+                bool flipY = projectData.MatrixM22 > 0;
+
+                // 应用图片变换
+                if (flipX || flipY)
+                {
+                    try
+                    {
+                        double translateX = flipX ? pixelWidth : 0;
+                        double translateY = flipY ? pixelHeight : 0;
+
+                        // 创建变换后的位图
+                        displayBitmap = new TransformedBitmap(
+                            DutImageSource,
+                            new MatrixTransform(flipX ? -1 : 1, 0, 0, flipY ? -1 : 1, translateX, translateY));
+                    }
+                    catch
+                    {
+                        // 变换失败时使用原始图片
+                        displayBitmap = DutImageSource;
+                    }
+                }*/
+            }
+
+            try
+            {
+                // 将位图转换为内存流并创建图片注释
+                using (var stream = new MemoryStream())
+                {
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(displayBitmap));
+                    encoder.Save(stream);
+
+                    // 创建热力图图片注释
+                    var imageAnnotation = new ImageAnnotation
+                    {
+                        ImageSource = new OxyImage(stream.ToArray()),
+                        X = new PlotLength((xMin + xMax) / 2, PlotLengthUnit.Data),
+                        Y = new PlotLength((yMin + yMax) / 2, PlotLengthUnit.Data),
+                        Width = new PlotLength(xMax - xMin, PlotLengthUnit.Data),
+                        Height = new PlotLength(yMax - yMin, PlotLengthUnit.Data),
+                        Layer = AnnotationLayer.BelowSeries,
+                        Interpolate = true
+                    };
+
+                    // 添加注释到热力图
+                    HeatmapModel.Annotations.Add(imageAnnotation);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 捕获并输出背景更新错误
+                Console.WriteLine("BG Error: " + ex.Message);
+            }
+
+            // 重置坐标轴并刷新热力图
+            HeatmapModel.ResetAllAxes();
+            HeatmapModel.InvalidatePlot(true);
+        }
+
+        /// <summary>
+        /// 设置变更事件处理方法
+        /// </summary>
+        /// <param name="sender">事件发送者</param>
+        /// <param name="e">属性变更参数</param>
+        private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            // 获取当前选中的项目并自动保存
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
+            if (selectedProject != null)
+            {
+                AutoSaveCurrentProject(selectedProject);
+            }
+        }
+
+        /// <summary>
+        /// 执行添加新项目操作
+        /// </summary>
+        /// <param name="parameter">命令参数</param>
+        private void ExecuteAddNewProject(object? parameter)
+        {
+            try
+            {
+                // 弹出输入对话框获取项目名称
+                var inputDialog = new InputDialog("请输入新项目的名称:", "新项目");
+                if (inputDialog.ShowDialog() != true) return;
+
+                string projectName = inputDialog.Answer;
+                if (string.IsNullOrWhiteSpace(projectName)) return;
+
+                // 弹出文件夹选择对话框获取项目存放路径
+                var folderDialog = new System.Windows.Forms.FolderBrowserDialog
+                {
+                    Description = "请选择项目的存放路径"
+                };
+
+                if (folderDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+                // 构建项目完整路径
+                string projectPath = Path.Combine(folderDialog.SelectedPath, projectName);
+
+                // 检查路径是否已存在
+                if (Directory.Exists(projectPath))
+                {
+                    MessageBox.Show("同名项目文件夹已存在！", "错误");
+                    return;
+                }
+
+                // 创建项目文件夹
+                Directory.CreateDirectory(projectPath);
+
+                // 创建新项目视图模型并添加到项目列表
+                var newProject = new ProjectViewModel(projectName, projectPath, this);
+                Projects.Add(newProject);
+
+                // 取消其他项目的选中状态，设置新项目为选中
+                foreach (var proj in Projects.Where(p => p != newProject))
+                {
+                    proj.IsSelected = false;
+                }
+                newProject.IsSelected = true;
+
+                // 加载项目数据并自动保存
+                LoadProjectDataIntoViewModel(newProject);
+                AutoSaveCurrentProject(newProject);
+            }
+            catch (Exception ex)
+            {
+                // 捕获并显示创建项目错误
+                MessageBox.Show("创建新项目时发生严重错误: " + ex.Message, "错误");
+            }
+        }
+
+        /// <summary>
+        /// 执行加载项目操作
+        /// </summary>
+        /// <param name="parameter">命令参数</param>
+        private void ExecuteLoadProject(object? parameter)
+        {
+            try
+            {
+                // 弹出文件选择对话框选择项目文件
+                var openFileDialog = new OpenFileDialog
+                {
+                    Filter = "项目文件 (*.json)|*.json"
+                };
+
+                if (openFileDialog.ShowDialog() == true)
+                {
+                    string filePath = openFileDialog.FileName;
+                    string fileContent = File.ReadAllText(filePath);
+
+                    // 验证文件内容有效性
+                    if (string.IsNullOrWhiteSpace(fileContent))
+                    {
+                        MessageBox.Show("项目文件为空或已损坏。", "错误");
+                        return;
+                    }
+
+                    // 反序列化项目数据
+                    var projectData = System.Text.Json.JsonSerializer.Deserialize<ProjectData>(fileContent);
+                    if (projectData == null)
+                    {
+                        MessageBox.Show("无法解析项目文件。", "错误");
+                        return;
+                    }
+
+                    // 获取项目文件夹路径
+                    string projectFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
+                    if (string.IsNullOrEmpty(projectFolder))
+                    {
+                        MessageBox.Show("无法获取项目文件夹路径。", "错误");
+                        return;
+                    }
+
+                    // 创建加载的项目视图模型
+                    var loadedProject = new ProjectViewModel(projectData.ProjectName, projectFolder, this)
+                    {
+                        ProjectData = projectData
+                    };
+
+                    // 加载测量项数据
+                    if (projectData.MeasurementNames != null)
+                    {
+                        foreach (var name in projectData.MeasurementNames)
+                        {
+                            loadedProject.Measurements.Add(new MeasurementViewModel(name, loadedProject));
+                        }
+                    }
+
+                    // 添加到项目列表并设置为选中状态
+                    Projects.Add(loadedProject);
+                    foreach (var proj in Projects.Where(p => p != loadedProject))
+                    {
+                        proj.IsSelected = false;
+                    }
+                    loadedProject.IsSelected = true;
+
+                    // 加载项目数据到视图模型
+                    LoadProjectDataIntoViewModel(loadedProject);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 捕获并显示加载项目错误
+                MessageBox.Show("加载项目时发生严重错误: " + ex.Message, "错误");
+            }
+        }
+
+        /// <summary>
+        /// 自动保存当前选中的项目
+        /// </summary>
+        /// <param name="project">需要保存的项目</param>
+        public void AutoSaveCurrentProject(ProjectViewModel project)
+        {
+            // 验证项目有效性
+            if (project?.ProjectData == null) return;
+
+            // 更新项目配置数据
+            project.ProjectData.ScanConfig = this.CurrentScanSettings;
+            project.ProjectData.InstrumentConfig = this.CurrentInstrumentSettings;
+            project.ProjectData.MeasurementNames = project.Measurements.Select(m => m.DisplayName).ToList();
+
+            try
+            {
+                // 构建保存路径并序列化保存
+                string filePath = Path.Combine(project.ProjectFolderPath, "project.json");
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                string jsonString = System.Text.Json.JsonSerializer.Serialize(project.ProjectData, options);
+
+                File.WriteAllText(filePath, jsonString);
+            }
+            catch (Exception ex)
+            {
+                // 输出保存失败信息
+                Console.WriteLine($"自动保存失败: {ex.Message}");
+            }
+        }
         // **确保同步设置对象**
         internal void LoadProjectDataIntoViewModel(ProjectViewModel? project)
         {
@@ -306,7 +634,7 @@ namespace FieldScanNew.ViewModels
             finally { IsScanning = false; }
         }
 
-            private async Task QBCExecuteStartScan()
+        private async Task QBCExecuteStartScan()
         {
             // ===================== 原有逻辑：前置校验（完全保留） =====================
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -591,7 +919,7 @@ namespace FieldScanNew.ViewModels
                     Console.WriteLine($"QBC采样进度：{sampledPoints.Count}/{targetSampleCount}");
                 }
 
-                                // 1. 调用填充方法（复用原有变量，仅新增临时变量）
+                // 1. 调用填充方法（复用原有变量，仅新增临时变量）
                 var (filledHeatMapData, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
                 heatMapSeries = HeatmapModel.Series.OfType<HeatMapSeries>().FirstOrDefault();
                 if (heatMapSeries != null)
@@ -629,10 +957,10 @@ namespace FieldScanNew.ViewModels
                     {
                         float targetX = (float)xCoor[i];
                         var key = ((float)Math.Round(targetX, 3), (float)Math.Round(targetY, 3));
-                        
+
                         // 获取填充后的幅值（已采样点=原始值，未采样点=RBF均值）
                         double filledVal = fullPointMap.TryGetValue(key, out var val) ? val : 0;
-                        
+
                         // 复用sbPeak：写入填充后的数据（保留原格式）
                         sbPeak.AppendLine($"{targetX:F3},{targetY:F3},{filledVal:F3}");
 
@@ -844,7 +1172,7 @@ namespace FieldScanNew.ViewModels
             private double[] _yObs;
             private RbfKernel _kernel;
             private int _degree;
-            private Vector<double> _weights;
+            private MathNet.Numerics.LinearAlgebra.Vector<double> _weights;
             private int _polySize;
 
             public RbfInterpolator(double[][] xObs, double[] yObs, RbfKernel kernel, int degree)
@@ -1023,7 +1351,7 @@ namespace FieldScanNew.ViewModels
             // 2. 生成全场网格坐标（和原始扫描分辨率一致）
             var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
             var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
-            
+
             // 3. 构建已采样点的坐标-幅值映射（快速查询）
             var sampledPointMap = new Dictionary<(float X, float Y), double>();
             foreach (var p in sampledPoints)

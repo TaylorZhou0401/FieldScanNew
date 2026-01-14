@@ -141,10 +141,10 @@ namespace FieldScanNew.ViewModels
             //修正：基于使用者视角调节步进方向
             switch (direction)
             {
-                case "X+": x = -JogStep; break;
-                case "X-": x = JogStep; break;
-                case "Y+": y = -JogStep; break;
-                case "Y-": y = JogStep; break;
+                case "X+": x = JogStep; break;
+                case "X-": x = -JogStep; break;
+                case "Y+": y = JogStep; break;
+                case "Y-": y = -JogStep; break;
                 case "Z+": z = JogStep; break;
                 case "Z-": z = -JogStep; break;
                 case "R+": r = AngleStep; break;
@@ -172,12 +172,88 @@ namespace FieldScanNew.ViewModels
 
         private async Task ExecuteReadRobotPos(object? parameter)
         {
-            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected) { MessageBox.Show("未连接！", "错误"); return; }
-            try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); _projectData.ScanConfig.ScanHeightZ = pos.Z; _projectData.ScanConfig.ScanAngleR = pos.R; string target = parameter as string ?? "1"; if (target == "1") { PhysicalX1 = pos.X; PhysicalY1 = pos.Y; } else if (target == "2") { PhysicalX2 = pos.X; PhysicalY2 = pos.Y; } } catch (Exception ex) { MessageBox.Show("读取失败: " + ex.Message); }
+            // 校验机械臂连接状态
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
+            {
+                MessageBox.Show("未连接！", "错误");
+                return;
+            }
+
+            try
+            {
+                // 读取机械臂当前位置
+                var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
+
+                // 保存Z轴高度和R轴角度
+                _projectData.ScanConfig.ScanHeightZ = pos.Z;
+                _projectData.ScanConfig.ScanAngleR = pos.R;
+
+                // 确定目标点位（1/2），更新对应物理坐标
+                string target = parameter as string ?? "1";
+                if (target == "1")
+                {
+                    PhysicalX1 = pos.X;
+                    PhysicalY1 = pos.Y;
+                }
+                else if (target == "2")
+                {
+                    PhysicalX2 = pos.X;
+                    PhysicalY2 = pos.Y;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("读取失败: " + ex.Message);
+            }
         }
 
-        private void ExecuteCalibrate(object? obj) { if (_clickStep < 2) { MessageBox.Show("请先选两个点。", "提示"); return; } double dxPix = _pixelP2.X - _pixelP1.X; double dyPix = _pixelP2.Y - _pixelP1.Y; double dxPhy = PhysicalX2 - PhysicalX1; double dyPhy = PhysicalY2 - PhysicalY1; if (Math.Abs(dxPix) < 1.0 && Math.Abs(dyPix) < 1.0) { MessageBox.Show("两点重合！", "错误"); return; } double scaleX = (Math.Abs(dxPix) > 10) ? (dxPhy / dxPix) : 1.0; double scaleY = (Math.Abs(dyPix) > 10) ? (dyPhy / dyPix) : 1.0; double offsetX = PhysicalX1 - scaleX * _pixelP1.X; double offsetY = PhysicalY1 - scaleY * _pixelP1.Y; _projectData.MatrixM11 = scaleX; _projectData.MatrixM22 = scaleY; _projectData.MatrixM12 = 0; _projectData.MatrixM21 = 0; _projectData.OffsetX = offsetX; _projectData.OffsetY = offsetY; _projectData.IsCalibrated = true; MessageBox.Show($"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): {_projectData.ScanConfig.ScanAngleR:F2} °", "成功"); }
+        private void ExecuteCalibrate(object? obj)
+        {
+            // 校验选点数量
+            if (_clickStep < 2)
+            {
+                MessageBox.Show("请先选两个点。", "提示");
+                return;
+            }
 
+            // 计算像素坐标差值
+            double dxPix = _pixelP2.X - _pixelP1.X;
+            double dyPix = _pixelP2.Y - _pixelP1.Y;
+
+            // 计算物理坐标差值
+            double dxPhy = PhysicalX2 - PhysicalX1;
+            double dyPhy = PhysicalY2 - PhysicalY1;
+
+            // 校验两点是否重合
+            if (Math.Abs(dxPix) < 1.0 && Math.Abs(dyPix) < 1.0)
+            {
+                MessageBox.Show("两点重合！", "错误");
+                return;
+            }
+
+            // 计算X/Y轴缩放系数（像素→物理）
+            double scaleX = (Math.Abs(dxPix) > 10) ? (dxPhy / dxPix) : 1.0;
+            double scaleY = (Math.Abs(dyPix) > 10) ? (dyPhy / dyPix) : 1.0;
+
+            // 计算坐标偏移量
+            double offsetX = PhysicalX1 - scaleX * _pixelP1.X;
+            double offsetY = PhysicalY1 - scaleY * _pixelP1.Y;
+
+            // 保存校准矩阵和偏移量
+            _projectData.MatrixM11 = scaleX;
+            _projectData.MatrixM22 = scaleY;
+            _projectData.MatrixM12 = 0;
+            _projectData.MatrixM21 = 0;
+            _projectData.OffsetX = offsetX;
+            _projectData.OffsetY = offsetY;
+            _projectData.IsCalibrated = true;
+
+            // 提示校准成功
+            MessageBox.Show(
+                $"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): {_projectData.ScanConfig.ScanAngleR:F2} °",
+                "成功"
+            );
+        }
         // **修正1：允许随时选点**
         public void HandleImageClick(Point pixelPoint)
         {
