@@ -1,0 +1,42 @@
+{
+  "ProjectName": "\u65B0\u9879\u76EE2",
+  "DutImagePath": "D:\\Scan_system\\FieldScanNew\\\u5DE5\u7A0B\u6D4B\u8BD5\\\u65B0\u9879\u76EE2\\Images\\Capture_20260116_000901.jpg",
+  "ActiveProbeName": null,
+  "InstrumentConfig": {
+    "IpAddress": "192.168.1.51",
+    "Port": 5025,
+    "CenterFrequencyHz": 1000000000,
+    "CenterFrequencyUnit": "GHz",
+    "SpanHz": 100000000,
+    "SpanUnit": "MHz",
+    "Points": 1001,
+    "ReferenceLevelDb": 0,
+    "RbwHz": -1,
+    "RbwUnit": "KHz",
+    "VbwHz": -1,
+    "VbwUnit": "KHz"
+  },
+  "ScanConfig": {
+    "StartX": 203.242249,
+    "StartY": -136.476517,
+    "StopX": 254.347061,
+    "StopY": -3.61903524,
+    "NumX": 5,
+    "NumY": 5,
+    "ScanHeightZ": -147.464905,
+    "ScanAngleR": 90,
+    "ScanHx": true,
+    "ScanHy": true
+  },
+  "MeasurementNames": [
+    "test"
+  ],
+  "IsCalibrated": true,
+  "MatrixM11": 0.27129469749886442,
+  "MatrixM12": 0,
+  "MatrixM21": 0,
+  "MatrixM22": -0.29633883721012078,
+  "RotateAngle": 0,
+  "OffsetX": 48.77794007255082,
+  "OffsetY": 14.584324582264973
+}

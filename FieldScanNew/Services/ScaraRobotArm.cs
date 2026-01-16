@@ -17,7 +17,7 @@ namespace FieldScanNew.Services
             if (IsConnected) return;
             await Task.Run(() =>
             {
-                int robotId = 19;//机械臂ID，企业交付版为82
+                int robotId = 19; // 机械臂ID
                 TcpserverEx.net_port_initial();
                 Thread.Sleep(3000);
                 _robot = TcpserverEx.get_robot(robotId);
@@ -32,6 +32,20 @@ namespace FieldScanNew.Services
                 _robot.unlock_position();
                 _robot.set_drag_teach(false);
                 IsConnected = true;
+
+                // =======================================================
+                // 修改：连接成功后，自动将 R 轴归位到 90 度
+                // =======================================================
+                try
+                {
+                    _robot.get_scara_param();
+                    float currentX = _robot.x;
+                    float currentY = _robot.y;
+                    float currentZ = _robot.z;
+                    // 使用安全速度 (30) 将 R 轴移动到 90
+                    _robot.new_movej_xyz_lr(currentX, currentY, currentZ, 90f, 30, 1, currentY > 0 ? 1 : -1);
+                }
+                catch { /* 忽略初始化移动异常 */ }
             });
         }
 
@@ -85,8 +99,6 @@ namespace FieldScanNew.Services
             });
         }
 
-        // **核心修正：实现 MoveToNoWaitAsync**
-        // 只发指令，不检查是否到达（专门用于拖动模式下的 Z 轴保持）
         public async Task MoveToNoWaitAsync(float x, float y, float z, float r)
         {
             if (!IsConnected || _robot == null) throw new InvalidOperationException("机器人未连接");

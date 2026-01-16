@@ -25,8 +25,16 @@ namespace FieldScanNew.Models
         private float _scanHeightZ;
         public float ScanHeightZ { get => _scanHeightZ; set { _scanHeightZ = value; OnPropertyChanged(); } }
 
-        // **核心修正：新增 R 轴角度属性**
         private float _scanAngleR;
         public float ScanAngleR { get => _scanAngleR; set { _scanAngleR = value; OnPropertyChanged(); } }
+
+        // ================================================================
+        // **新增：扫描分量选择**
+        // ================================================================
+        private bool _scanHx = true; // 默认勾选 X 分量
+        public bool ScanHx { get => _scanHx; set { _scanHx = value; OnPropertyChanged(); } }
+
+        private bool _scanHy = false;
+        public bool ScanHy { get => _scanHy; set { _scanHy = value; OnPropertyChanged(); } }
     }
 }

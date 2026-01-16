@@ -1,6 +1,6 @@
 {
   "ProjectName": "\u65B0\u9879\u76EE1",
-  "DutImagePath": "D:\\Scan_system\\FieldScanNew\\\u5DE5\u7A0B\u6D4B\u8BD5\\\u65B0\u9879\u76EE1\\Images\\Capture_20260114_133050.jpg",
+  "DutImagePath": "D:\\Scan_system\\FieldScanNew\\\u5DE5\u7A0B\u6D4B\u8BD5\\\u65B0\u9879\u76EE1\\Images\\Capture_20260115_232409.jpg",
   "ActiveProbeName": null,
   "InstrumentConfig": {
     "IpAddress": "192.168.1.51",
@@ -17,14 +17,16 @@
     "VbwUnit": "KHz"
   },
   "ScanConfig": {
-    "StartX": 143.444672,
-    "StartY": -193.65181,
-    "StopX": 282.326599,
-    "StopY": -131.128708,
+    "StartX": 230.764511,
+    "StartY": -160.737488,
+    "StopX": 327.357422,
+    "StopY": -46.8904915,
     "NumX": 10,
     "NumY": 10,
-    "ScanHeightZ": -105.559998,
-    "ScanAngleR": -178.009506
+    "ScanHeightZ": -0.42050001,
+    "ScanAngleR": 0,
+    "ScanHx": true,
+    "ScanHy": true
   },
   "MeasurementNames": [
     "\u6B63\u9762Hx",
@@ -42,11 +44,11 @@
     "test"
   ],
   "IsCalibrated": true,
-  "MatrixM11": 0.2094510512058787,
+  "MatrixM11": -0.13284263565165785,
   "MatrixM12": 0,
   "MatrixM21": 0,
-  "MatrixM22": 0.2169344665934739,
+  "MatrixM22": -0.31808814252674511,
   "RotateAngle": 0,
-  "OffsetX": 116.51657514356108,
-  "OffsetY": -226.59263929348549
+  "OffsetX": 365.45658503272983,
+  "OffsetY": -17.164814712804414
 }
