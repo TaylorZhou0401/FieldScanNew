@@ -42,6 +42,8 @@ namespace FieldScanNew.ViewModels
         private float _jogStep = 10.0f;
         public float JogStep { get => _jogStep; set { _jogStep = value; OnPropertyChanged(); } }
 
+        // R 轴步长属性已移除 (因为R轴不再手动微调)
+
         private string _instructionText = "步骤1：打开摄像头，点击【拍照】获取基准图。";
         public string InstructionText { get => _instructionText; set { _instructionText = value; OnPropertyChanged(); } }
 
@@ -69,6 +71,11 @@ namespace FieldScanNew.ViewModels
         public ICommand ReadRobotPosCommand { get; }
         public ICommand ToggleDragCommand { get; }
 
+        // ==========================================
+        // 新增：重置 R 轴命令
+        // ==========================================
+        public ICommand ResetRAxisCommand { get; }
+
         public XYCalibViewModel(ProjectData projectData, string projectFolderPath)
         {
             _projectData = projectData;
@@ -86,6 +93,9 @@ namespace FieldScanNew.ViewModels
             ReadRobotPosCommand = new RelayCommand(async (param) => await ExecuteReadRobotPos(param));
             ToggleDragCommand = new RelayCommand(async (_) => await ExecuteToggleDrag());
 
+            // 初始化新命令
+            ResetRAxisCommand = new RelayCommand(async (_) => await ExecuteResetRAxis());
+
             _cameraService.NewFrameReceived += OnNewFrameReceived;
 
             if (!string.IsNullOrEmpty(_projectData.DutImagePath) && System.IO.File.Exists(_projectData.DutImagePath))
@@ -94,9 +104,6 @@ namespace FieldScanNew.ViewModels
             }
         }
 
-        // =======================================================
-        // 修改：进入此界面时，确保 R 轴为 90 度
-        // =======================================================
         public async Task InitializeRobotStateAsync()
         {
             if (_hardwareService.ActiveRobot != null && _hardwareService.ActiveRobot.IsConnected)
@@ -104,8 +111,7 @@ namespace FieldScanNew.ViewModels
                 try
                 {
                     var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    // 如果角度偏离 90 度超过 0.1，则强制修正到 90
-                    if (Math.Abs(pos.R - 90f) > 0.1)
+                    if (Math.Abs(pos.R - 90f) > 0.1) // 保持 90 度逻辑
                     {
                         await _hardwareService.ActiveRobot.MoveToNoWaitAsync(pos.X, pos.Y, pos.Z, 90f);
                     }
@@ -114,6 +120,29 @@ namespace FieldScanNew.ViewModels
                 {
                     System.Diagnostics.Debug.WriteLine($"归位失败: {ex.Message}");
                 }
+            }
+        }
+
+        // ==========================================
+        // 新增：执行重置 R 轴逻辑
+        // ==========================================
+        private async Task ExecuteResetRAxis()
+        {
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
+            {
+                MessageBox.Show("机械臂未连接！", "错误");
+                return;
+            }
+
+            try
+            {
+                var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                // 保持 XYZ 不变，R 归位到 90
+                await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, 0f);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"重置 R 轴失败: {ex.Message}", "错误");
             }
         }
 
@@ -133,7 +162,7 @@ namespace FieldScanNew.ViewModels
                     await _hardwareService.ActiveRobot.SetDragModeAsync(true);
                     IsDragMode = true;
                     await Task.Delay(500);
-                    // 拖动模式下，强制保持 R=90
+                    // 拖动时保持 R=90
                     await _hardwareService.ActiveRobot.MoveToNoWaitAsync(currentPos.X, currentPos.Y, currentPos.Z, 90f);
                 }
                 else
@@ -157,6 +186,7 @@ namespace FieldScanNew.ViewModels
             }
 
             float x = 0, y = 0, z = 0;
+            // 移除了 R+ / R- 的 case
             switch (direction)
             {
                 case "X+": x = JogStep; break;
@@ -172,13 +202,12 @@ namespace FieldScanNew.ViewModels
                 if (IsDragMode)
                 {
                     var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    // 拖动微调时，强制目标 R=90
+                    // 拖动微调时，保持 R=90
                     await _hardwareService.ActiveRobot.MoveToNoWaitAsync(currentPos.X + x, currentPos.Y + y, currentPos.Z + z, 90f);
                 }
                 else
                 {
-                    // 点动模式 MoveJogAsync 是增量运动
-                    // 此时 R 增量为 0，即不改变当前角度（应已维持在 90）
+                    // 点动时 R 增量为 0
                     await _hardwareService.ActiveRobot.MoveJogAsync(x, y, z, 0);
                 }
             }
@@ -196,7 +225,7 @@ namespace FieldScanNew.ViewModels
             {
                 var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
 
-                // 修改：校准时强制记录的角度为 90
+                // 核心修改：强制记录的 R 角度为 90
                 _projectData.ScanConfig.ScanHeightZ = pos.Z;
                 _projectData.ScanConfig.ScanAngleR = 90f;
 
@@ -234,7 +263,6 @@ namespace FieldScanNew.ViewModels
             CameraPreviewSource = null;
             IsCameraMode = false;
 
-            // 提示信息更新为 90 度
             MessageBox.Show($"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): 90.00 °", "成功");
         }
 

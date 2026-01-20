@@ -25,8 +25,8 @@
     "NumY": 5,
     "ScanHeightZ": -147.464905,
     "ScanAngleR": 90,
-    "ScanHx": true,
-    "ScanHy": true
+    "ScanHx": false,
+    "ScanHy": false
   },
   "MeasurementNames": [
     "test"

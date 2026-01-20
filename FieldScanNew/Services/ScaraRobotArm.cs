@@ -12,15 +12,21 @@ namespace FieldScanNew.Services
         public bool IsConnected { get; private set; } = false;
         private ControlBeanEx? _robot;
 
+        // ==========================================
+        // 修改：增加 RobotId 属性，默认为 19
+        // ==========================================
+        public int RobotId { get; set; } = 19;
+
         public async Task ConnectAsync()
         {
             if (IsConnected) return;
             await Task.Run(() =>
             {
-                int robotId = 19; // 机械臂ID
+                // 使用属性 RobotId 代替硬编码的 19
                 TcpserverEx.net_port_initial();
                 Thread.Sleep(3000);
-                _robot = TcpserverEx.get_robot(robotId);
+                _robot = TcpserverEx.get_robot(RobotId);
+
                 for (int i = 0; i < 10; i++)
                 {
                     Thread.Sleep(500);
@@ -33,19 +39,15 @@ namespace FieldScanNew.Services
                 _robot.set_drag_teach(false);
                 IsConnected = true;
 
-                // =======================================================
-                // 修改：连接成功后，自动将 R 轴归位到 90 度
-                // =======================================================
                 try
                 {
                     _robot.get_scara_param();
                     float currentX = _robot.x;
                     float currentY = _robot.y;
                     float currentZ = _robot.z;
-                    // 使用安全速度 (30) 将 R 轴移动到 90
                     _robot.new_movej_xyz_lr(currentX, currentY, currentZ, 90f, 30, 1, currentY > 0 ? 1 : -1);
                 }
-                catch { /* 忽略初始化移动异常 */ }
+                catch { }
             });
         }
 
