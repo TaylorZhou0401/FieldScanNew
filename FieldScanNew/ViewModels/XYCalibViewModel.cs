@@ -30,10 +30,21 @@ namespace FieldScanNew.ViewModels
         private bool _isCameraMode = false;
         public bool IsCameraMode { get => _isCameraMode; set { _isCameraMode = value; OnPropertyChanged(); } }
 
-        private bool _isDragMode = false;
-        public bool IsDragMode { get => _isDragMode; set { _isDragMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(DragButtonText)); OnPropertyChanged(nameof(DragButtonColor)); } }
-        public string DragButtonText => IsDragMode ? "🔓 已松开 (点击锁止)" : "🔒 拖动示教 (点击松开)";
-        public string DragButtonColor => IsDragMode ? "#FFCCCC" : "#DDDDDD";
+        // [已删除] 拖动示教相关的属性 (IsDragMode, DragButtonText, DragButtonColor)
+
+        // 机械臂 ID 属性 (绑定到 ScaraRobotArm)
+        public int RobotId
+        {
+            get => (_hardwareService.ActiveRobot as ScaraRobotArm)?.RobotId ?? 19;
+            set
+            {
+                if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
+                {
+                    robot.RobotId = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         public ObservableCollection<string> CameraList { get; }
         private int _selectedCameraIndex = 0;
@@ -41,8 +52,6 @@ namespace FieldScanNew.ViewModels
 
         private float _jogStep = 10.0f;
         public float JogStep { get => _jogStep; set { _jogStep = value; OnPropertyChanged(); } }
-
-        // R 轴步长属性已移除 (因为R轴不再手动微调)
 
         private string _instructionText = "步骤1：打开摄像头，点击【拍照】获取基准图。";
         public string InstructionText { get => _instructionText; set { _instructionText = value; OnPropertyChanged(); } }
@@ -69,12 +78,8 @@ namespace FieldScanNew.ViewModels
         public ICommand CalibrateCommand { get; }
         public ICommand JogCommand { get; }
         public ICommand ReadRobotPosCommand { get; }
-        public ICommand ToggleDragCommand { get; }
-
-        // ==========================================
-        // 新增：重置 R 轴命令
-        // ==========================================
         public ICommand ResetRAxisCommand { get; }
+        // [已删除] ToggleDragCommand
 
         public XYCalibViewModel(ProjectData projectData, string projectFolderPath)
         {
@@ -91,10 +96,9 @@ namespace FieldScanNew.ViewModels
             CalibrateCommand = new RelayCommand(ExecuteCalibrate);
             JogCommand = new RelayCommand(async (param) => await ExecuteJog(param));
             ReadRobotPosCommand = new RelayCommand(async (param) => await ExecuteReadRobotPos(param));
-            ToggleDragCommand = new RelayCommand(async (_) => await ExecuteToggleDrag());
-
-            // 初始化新命令
             ResetRAxisCommand = new RelayCommand(async (_) => await ExecuteResetRAxis());
+
+            // [已删除] ToggleDragCommand 初始化
 
             _cameraService.NewFrameReceived += OnNewFrameReceived;
 
@@ -111,7 +115,7 @@ namespace FieldScanNew.ViewModels
                 try
                 {
                     var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    if (Math.Abs(pos.R - 90f) > 0.1) // 保持 90 度逻辑
+                    if (Math.Abs(pos.R - 90f) > 0.1)
                     {
                         await _hardwareService.ActiveRobot.MoveToNoWaitAsync(pos.X, pos.Y, pos.Z, 90f);
                     }
@@ -123,9 +127,6 @@ namespace FieldScanNew.ViewModels
             }
         }
 
-        // ==========================================
-        // 新增：执行重置 R 轴逻辑
-        // ==========================================
         private async Task ExecuteResetRAxis()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
@@ -137,8 +138,7 @@ namespace FieldScanNew.ViewModels
             try
             {
                 var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                // 保持 XYZ 不变，R 归位到 90
-                await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, 0f);
+                await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, 90f);
             }
             catch (Exception ex)
             {
@@ -146,47 +146,21 @@ namespace FieldScanNew.ViewModels
             }
         }
 
-        private async Task ExecuteToggleDrag()
-        {
-            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
-            {
-                MessageBox.Show("机械臂未连接，无法启用拖动示教！", "错误");
-                return;
-            }
-
-            try
-            {
-                if (!IsDragMode)
-                {
-                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    await _hardwareService.ActiveRobot.SetDragModeAsync(true);
-                    IsDragMode = true;
-                    await Task.Delay(500);
-                    // 拖动时保持 R=90
-                    await _hardwareService.ActiveRobot.MoveToNoWaitAsync(currentPos.X, currentPos.Y, currentPos.Z, 90f);
-                }
-                else
-                {
-                    await _hardwareService.ActiveRobot.SetDragModeAsync(false);
-                    IsDragMode = false;
-                }
-            }
-            catch (Exception ex) { MessageBox.Show($"切换拖动模式失败: {ex.Message}", "错误"); IsDragMode = false; }
-        }
+        // [已删除] ExecuteToggleDrag 方法
 
         private async Task ExecuteJog(object? parameter)
         {
-            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected) { MessageBox.Show("机械臂未连接！", "错误"); return; }
-            string direction = parameter as string ?? "";
-
-            if (IsDragMode && (direction.StartsWith("X") || direction.StartsWith("Y")))
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
             {
-                MessageBox.Show("XY轴已松开，请直接用手拖动。\n若要微调，请先点击锁止按钮。", "提示");
+                MessageBox.Show("机械臂未连接！", "错误");
                 return;
             }
 
+            string direction = parameter as string ?? "";
+
+            // [已删除] 拖动模式下的阻挡逻辑
+
             float x = 0, y = 0, z = 0;
-            // 移除了 R+ / R- 的 case
             switch (direction)
             {
                 case "X+": x = JogStep; break;
@@ -199,17 +173,9 @@ namespace FieldScanNew.ViewModels
 
             try
             {
-                if (IsDragMode)
-                {
-                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    // 拖动微调时，保持 R=90
-                    await _hardwareService.ActiveRobot.MoveToNoWaitAsync(currentPos.X + x, currentPos.Y + y, currentPos.Z + z, 90f);
-                }
-                else
-                {
-                    // 点动时 R 增量为 0
-                    await _hardwareService.ActiveRobot.MoveJogAsync(x, y, z, 0);
-                }
+                // [修改] 移除了拖动模式判断，直接执行普通的 MoveJogAsync
+                // 注意：R 增量为 0，底层逻辑会维持当前角度（即 90 度）
+                await _hardwareService.ActiveRobot.MoveJogAsync(x, y, z, 0);
             }
             catch (Exception ex) { MessageBox.Show("移动失败: " + ex.Message); }
         }
@@ -225,7 +191,7 @@ namespace FieldScanNew.ViewModels
             {
                 var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
 
-                // 核心修改：强制记录的 R 角度为 90
+                // 强制记录 R=90
                 _projectData.ScanConfig.ScanHeightZ = pos.Z;
                 _projectData.ScanConfig.ScanAngleR = 90f;
 

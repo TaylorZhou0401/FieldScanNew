@@ -47,6 +47,18 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <None Update="lib\server.exe">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
+	  <None Update="lib\share.dll">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
+	  <None Update="lib\small_scara_interface.dll">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
+	</ItemGroup>
+
+	<ItemGroup>
 		<Page Update="Views\DialogWindow.xaml">
 			<Generator>MSBuild:Compile</Generator>
 		</Page>

@@ -50,10 +50,6 @@
 
                 <GroupBox Header="2. 机械臂控制" Padding="10" Margin="0,10,0,0">
                     <StackPanel>
-                        <Button Content="{Binding DragButtonText}" Command="{Binding ToggleDragCommand}" Background="{Binding DragButtonColor}" 
-                                FontSize="14" FontWeight="Bold" Height="40" Margin="0,0,0,5"
-                                ToolTip="开启后手动拖动XY。如需调整Z轴，直接点击下方Z按钮。"/>
-
                         <Button Content="⟲ 重置 R 轴 (90°)" Command="{Binding ResetRAxisCommand}" 
                                 Height="30" Margin="0,0,0,15" Background="#E1F5FE" FontWeight="Bold"
                                 ToolTip="强制将 R 轴旋转回 90 度"/>
@@ -72,7 +68,7 @@
                                 <ColumnDefinition Width="20"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            
+
                             <Grid Grid.Column="0">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>

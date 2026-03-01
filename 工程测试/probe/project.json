@@ -1,0 +1,43 @@
+{
+  "ProjectName": "probe",
+  "DutImagePath": null,
+  "ActiveProbeName": null,
+  "InstrumentConfig": {
+    "IpAddress": "192.168.1.51",
+    "Port": 5025,
+    "CenterFrequencyHz": 1000000000,
+    "CenterFrequencyUnit": "GHz",
+    "SpanHz": 100000000,
+    "SpanUnit": "MHz",
+    "Points": 1001,
+    "ReferenceLevelDb": 0,
+    "RbwHz": -1,
+    "RbwUnit": "KHz",
+    "VbwHz": -1,
+    "VbwUnit": "KHz",
+    "ProbePoints": []
+  },
+  "ScanConfig": {
+    "StartX": 232.293304,
+    "StartY": -196.389618,
+    "StopX": 341.931274,
+    "StopY": -96.8444901,
+    "NumX": 55,
+    "NumY": 50,
+    "ScanHeightZ": -189.509995,
+    "ScanAngleR": 90,
+    "ScanHx": true,
+    "ScanHy": true
+  },
+  "MeasurementNames": [
+    "probe1"
+  ],
+  "IsCalibrated": false,
+  "MatrixM11": 1,
+  "MatrixM12": 0,
+  "MatrixM21": 0,
+  "MatrixM22": 1,
+  "RotateAngle": 0,
+  "OffsetX": 0,
+  "OffsetY": 0
+}

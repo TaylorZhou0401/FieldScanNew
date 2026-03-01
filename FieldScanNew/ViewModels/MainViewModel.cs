@@ -140,10 +140,10 @@ namespace FieldScanNew.ViewModels
             var transparentColors = palette.Colors.Select(c => OxyColor.FromAColor(180, c));
             HeatmapModel.Axes.Add(new LinearColorAxis { Position = AxisPosition.Right, Palette = new OxyPalette(transparentColors), Title = "信号强度 (dBuV/m)" });
 
-            // 初始化频谱图横轴为频率
+            // 修改：横坐标显示频率，纵坐标由于加入了+107和探头因子，单位其实变成了 dBuV/m (或 dBuV)
             SpectrumModel = new PlotModel { Title = "实时频谱 (Trace)" };
             SpectrumModel.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, Title = "Frequency (Hz)" });
-            SpectrumModel.Axes.Add(new LinearAxis { Position = AxisPosition.Left, Title = "Amplitude (dBm)" });
+            SpectrumModel.Axes.Add(new LinearAxis { Position = AxisPosition.Left, Title = "Level (dBuV/m)" });
 
             Projects = new ObservableCollection<ProjectViewModel>();
             _currentScanSettings = new ScanSettings();
@@ -226,6 +226,30 @@ namespace FieldScanNew.ViewModels
         private string GetCurrentMeasurementName(ProjectViewModel project) { if (SelectedStep != null) { foreach (var m in project.Measurements) { if (m == SelectedStep || m.Steps.Contains(SelectedStep)) return m.DisplayName; } } return project.Measurements.Count > 0 ? project.Measurements.Last().DisplayName : "General"; }
         private string SanitizeFileName(string name) { var invalidChars = Path.GetInvalidFileNameChars(); return new string(name.Where(ch => !invalidChars.Contains(ch)).ToArray()); }
 
+        // =======================================================
+        // 核心方法：根据频率获取线性插值的探头因子
+        // 如果没有加载文件（Count=0），直接返回 0，确保默认逻辑正确
+        // =======================================================
+        private double GetInterpolatedFactor(double freqHz)
+        {
+            var points = CurrentInstrumentSettings?.ProbePoints;
+            if (points == null || points.Count == 0) return 0.0; // 默认因子为 0
+
+            // 如果只有一个点
+            if (points.Count == 1) return points[0].CorrectionFactor;
+
+            // 查找区间
+            var left = points.LastOrDefault(p => p.Frequency <= freqHz);
+            var right = points.FirstOrDefault(p => p.Frequency > freqHz);
+
+            if (left == null) return points.First().CorrectionFactor; // 频率低于最小值，取第一个
+            if (right == null) return points.Last().CorrectionFactor; // 频率高于最大值，取最后一个
+
+            // 线性插值
+            double ratio = (freqHz - left.Frequency) / (right.Frequency - left.Frequency);
+            return left.CorrectionFactor + ratio * (right.CorrectionFactor - left.CorrectionFactor);
+        }
+
         private async Task ExecuteStartScan()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -255,7 +279,6 @@ namespace FieldScanNew.ViewModels
 
             try
             {
-                // ================== 频率坐标计算逻辑 ==================
                 double centerFreq = CurrentInstrumentSettings.CenterFrequencyHz;
                 double span = CurrentInstrumentSettings.SpanHz;
                 double startFreq = centerFreq - (span / 2.0);
@@ -264,6 +287,7 @@ namespace FieldScanNew.ViewModels
                 foreach (var task in tasks)
                 {
                     if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+
                     string componentName = task.Name;
                     float robotAngle = task.Angle;
 
@@ -285,7 +309,7 @@ namespace FieldScanNew.ViewModels
                     var spectrumSeries = new LineSeries { Title = "Live Trace", Color = OxyColors.Blue, StrokeThickness = 1 };
                     SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
 
-                    var sbPeak = new StringBuilder(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBm)");
+                    var sbPeak = new StringBuilder(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
                     var sbFull = new StringBuilder(); bool isFullHeaderWritten = false;
 
                     for (int j = 0; j < scanSettings.NumY; j++)
@@ -293,6 +317,7 @@ namespace FieldScanNew.ViewModels
                         for (int i = 0; i < scanSettings.NumX; i++)
                         {
                             if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopScanLabel;
+
                             float targetX = scanSettings.StartX + i * (scanSettings.StopX - scanSettings.StartX) / (scanSettings.NumX - 1);
                             float targetY = scanSettings.StartY + j * (scanSettings.StopY - scanSettings.StartY) / (scanSettings.NumY - 1);
 
@@ -301,6 +326,16 @@ namespace FieldScanNew.ViewModels
 
                             if (traceData.Length > 0)
                             {
+                                // ========================================================
+                                // 修正数据：读数(dBm) + 107 + 探头因子
+                                // ========================================================
+                                for (int k = 0; k < traceData.Length; k++)
+                                {
+                                    double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
+                                    double factor = GetInterpolatedFactor(freq);
+                                    traceData[k] = traceData[k] + 107.0 + factor;
+                                }
+
                                 double maxVal = traceData.Max();
                                 double ratioX = (targetX - xMin) / (xMax - xMin);
                                 double ratioY = (targetY - yMin) / (yMax - yMin);
@@ -310,7 +345,6 @@ namespace FieldScanNew.ViewModels
                                 heatMapData[arrayX, arrayY] = maxVal;
                                 HeatmapModel.InvalidatePlot(true);
 
-                                // 修改频谱图横坐标为计算后的频率
                                 spectrumSeries.Points.Clear();
                                 for (int k = 0; k < traceData.Length; k++)
                                 {
@@ -320,6 +354,7 @@ namespace FieldScanNew.ViewModels
                                 SpectrumModel.InvalidatePlot(true);
 
                                 sbPeak.AppendLine($"{targetX:F3},{targetY:F3},{maxVal:F3}");
+
                                 if (!isFullHeaderWritten)
                                 {
                                     sbFull.Append("PhysicalX(mm),PhysicalY(mm)");
@@ -396,6 +431,7 @@ namespace FieldScanNew.ViewModels
                 foreach (var task in tasks)
                 {
                     if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+
                     string componentName = task.Name;
                     float robotAngle = task.Angle;
 
@@ -416,7 +452,7 @@ namespace FieldScanNew.ViewModels
                     var spectrumSeries = new LineSeries { Title = "Live Trace", Color = OxyColors.Blue, StrokeThickness = 1 };
                     SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
 
-                    var sbPeak = new StringBuilder(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBm)");
+                    var sbPeak = new StringBuilder(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
 
                     int sumSampleCount = scanSettings.NumX * scanSettings.NumY;
                     int targetSampleCount = (int)Math.Round(3.13 * Math.Pow(sumSampleCount, 0.602));
@@ -450,6 +486,14 @@ namespace FieldScanNew.ViewModels
                             await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, robotAngle);
                             double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
                             if (traceData.Length == 0) continue;
+
+                            // 修正数据 (QBC初始采样)
+                            for (int k = 0; k < traceData.Length; k++)
+                            {
+                                double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
+                                double factor = GetInterpolatedFactor(freq);
+                                traceData[k] = traceData[k] + 107.0 + factor;
+                            }
 
                             double maxVal = traceData.Max();
                             sampledPoints.Add(new SampledPoint { X = targetX, Y = targetY, Magnitude = maxVal });
@@ -485,6 +529,14 @@ namespace FieldScanNew.ViewModels
                         double[] newTraceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
                         if (newTraceData.Length == 0) continue;
 
+                        // 修正数据 (QBC迭代采样)
+                        for (int k = 0; k < newTraceData.Length; k++)
+                        {
+                            double freq = startFreq + (double)k * (stopFreq - startFreq) / (newTraceData.Length - 1);
+                            double factor = GetInterpolatedFactor(freq);
+                            newTraceData[k] = newTraceData[k] + 107.0 + factor;
+                        }
+
                         double newMaxVal = newTraceData.Max();
                         sampledPoints.Add(new SampledPoint { X = nextX, Y = nextY, Magnitude = newMaxVal });
 
@@ -500,7 +552,7 @@ namespace FieldScanNew.ViewModels
                     heatMapSeries.Data = filledHeatMapData;
                     HeatmapModel.InvalidatePlot(true);
 
-                    sbPeak.Clear(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBm)");
+                    sbPeak.Clear(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
                     var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
                     var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
 
