@@ -12,6 +12,18 @@ namespace FieldScanNew
             InitializeComponent();
             this.DataContext = new MainViewModel();
             TaskTreeView.SelectedItemChanged += TaskTreeView_SelectedItemChanged;
+
+            // 新增：监听鼠标点击，如果是重复点击已选中的项，手动触发逻辑
+            TaskTreeView.PreviewMouseLeftButtonUp += (s, e) => {
+                if (TaskTreeView.SelectedItem is IStepViewModel step)
+                {
+                    if (this.DataContext is MainViewModel vm)
+                    {
+                        // 强制调用一次逻辑
+                        vm.TriggerStepDialog(step);
+                    }
+                }
+            };
         }
 
         private void TaskTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
