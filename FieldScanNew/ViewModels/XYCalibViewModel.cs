@@ -3,6 +3,7 @@ using FieldScanNew.Models;
 using FieldScanNew.Services;
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -223,6 +224,16 @@ namespace FieldScanNew.ViewModels
             _projectData.MatrixM21 = 0;
             _projectData.OffsetX = offsetX;
             _projectData.OffsetY = offsetY;
+
+            // 计算旋转角度（标准化为90度倍数）
+            double pixAngle = Math.Atan2(-dyPix, dxPix);
+            double phyAngle = Math.Atan2(dyPhy, dxPhy);
+            double rotateAngle = (pixAngle - phyAngle) * (180.0 / Math.PI);
+            int standardAngle = (int)Math.Round(rotateAngle / 90.0) * 90;
+            standardAngle = (standardAngle + 360) % 360;
+            _projectData.RotateAngle = standardAngle;
+
+
             _projectData.IsCalibrated = true;
 
             _cameraService.StopCamera();

@@ -24,9 +24,10 @@ namespace FieldScanNew.Models
         public double MatrixM12 { get; set; } = 0.0;
         public double MatrixM21 { get; set; } = 0.0;
         public double MatrixM22 { get; set; } = 1.0;
-        public int RotateAngle { get; set; } = 0;
+        public double RotateAngle { get; set; } = 0.0;
         public double OffsetX { get; set; } = 0.0;
         public double OffsetY { get; set; } = 0.0;
+        
 
         public ProjectData()
         {
