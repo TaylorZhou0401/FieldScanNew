@@ -15,7 +15,7 @@
         </Grid.ColumnDefinitions>
 
         <StackPanel Grid.Column="0" Margin="0,0,20,0">
-            <TextBlock Text="扫描区域配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
+            <TextBlock Text="5. 扫描区域配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
 
             <GroupBox Header="物理坐标范围 (mm)" Padding="10">
                 <Grid>
@@ -55,6 +55,7 @@
                         <RowDefinition/>
                         <RowDefinition/>
                         <RowDefinition/>
+                        <RowDefinition/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="X 点数:" VerticalAlignment="Center" Margin="5"/>
@@ -67,7 +68,13 @@
                     <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Settings.ScanHeightZ, StringFormat=F2}" Margin="5"/>
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="R 角度:" VerticalAlignment="Center" Margin="5"/>
-                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.ScanAngleR, StringFormat=F2}" Margin="5" IsReadOnly="True" Background="#EEE"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.ScanAngleR, StringFormat=F2}" Margin="5" IsReadOnly="True" Background="#EEE" ToolTip="由分量选择自动控制"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="扫描分量:" VerticalAlignment="Center" Margin="5"/>
+                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="5">
+                        <CheckBox Content="X分量 (0°)" IsChecked="{Binding Settings.ScanHx}" Margin="0,0,10,0"/>
+                        <CheckBox Content="Y分量 (90°)" IsChecked="{Binding Settings.ScanHy}"/>
+                    </StackPanel>
                 </Grid>
             </GroupBox>
 

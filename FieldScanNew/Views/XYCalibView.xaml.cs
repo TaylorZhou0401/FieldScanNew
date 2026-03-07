@@ -1,12 +1,7 @@
-﻿using FieldScanNew.ViewModels;
+﻿using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
-
-// =========================================================================
-// **核心修正：添加别名，明确告诉编译器我们这里全部使用 WPF 版本的控件**
-// =========================================================================
-using UserControl = System.Windows.Controls.UserControl;
-using Image = System.Windows.Controls.Image;
-using Point = System.Windows.Point;
+using FieldScanNew.ViewModels;
 
 namespace FieldScanNew.Views
 {
@@ -15,21 +10,41 @@ namespace FieldScanNew.Views
         public XYCalibView()
         {
             InitializeComponent();
+            // 订阅加载事件
+            this.Loaded += XYCalibView_Loaded;
+        }
+
+        private void XYCalibView_Loaded(object sender, RoutedEventArgs e)
+        {
+            // 当界面加载时，调用 ViewModel 的初始化归位逻辑
+            if (this.DataContext is XYCalibViewModel vm)
+            {
+                Application.Current.Dispatcher.InvokeAsync(async () =>
+                {
+                    await vm.InitializeRobotStateAsync();
+                });
+            }
         }
 
         private void Image_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            // 这里的 Image 现在明确指向 System.Windows.Controls.Image
             var image = sender as Image;
-            if (image == null || image.Source == null) return;
+            if (image == null || this.DataContext == null) return;
+            var vm = this.DataContext as XYCalibViewModel;
+            if (vm == null) return;
 
-            // 获取点击位置相对于 Image 控件的坐标
-            // 这里的 Point 现在明确指向 System.Windows.Point
             Point clickPoint = e.GetPosition(image);
+            double currentWidth = image.ActualWidth;
+            double currentHeight = image.ActualHeight;
+            double originalWidth = vm.DutImageSource?.PixelWidth ?? 0;
+            double originalHeight = vm.DutImageSource?.PixelHeight ?? 0;
 
-            if (DataContext is XYCalibViewModel vm)
+            if (originalWidth > 0 && originalHeight > 0)
             {
-                vm.HandleImageClick(clickPoint);
+                double scaleX = originalWidth / currentWidth;
+                double scaleY = originalHeight / currentHeight;
+                Point pixelPoint = new Point(clickPoint.X * scaleX, clickPoint.Y * scaleY);
+                vm.HandleImageClick(pixelPoint);
             }
         }
     }

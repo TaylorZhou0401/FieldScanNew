@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
-
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 using Point = System.Windows.Point;
@@ -32,10 +31,21 @@ namespace FieldScanNew.ViewModels
         private bool _isCameraMode = false;
         public bool IsCameraMode { get => _isCameraMode; set { _isCameraMode = value; OnPropertyChanged(); } }
 
-        private bool _isDragMode = false;
-        public bool IsDragMode { get => _isDragMode; set { _isDragMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(DragButtonText)); OnPropertyChanged(nameof(DragButtonColor)); } }
-        public string DragButtonText => IsDragMode ? "🔓 已松开 (点击锁止)" : "🔒 拖动示教 (点击松开)";
-        public string DragButtonColor => IsDragMode ? "#FFCCCC" : "#DDDDDD";
+        // [已删除] 拖动示教相关的属性 (IsDragMode, DragButtonText, DragButtonColor)
+
+        // 机械臂 ID 属性 (绑定到 ScaraRobotArm)
+        public int RobotId
+        {
+            get => (_hardwareService.ActiveRobot as ScaraRobotArm)?.RobotId ?? 19;
+            set
+            {
+                if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
+                {
+                    robot.RobotId = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         public ObservableCollection<string> CameraList { get; }
         private int _selectedCameraIndex = 0;
@@ -43,9 +53,6 @@ namespace FieldScanNew.ViewModels
 
         private float _jogStep = 10.0f;
         public float JogStep { get => _jogStep; set { _jogStep = value; OnPropertyChanged(); } }
-
-        private float _angleStep = 5.0f;
-        public float AngleStep { get => _angleStep; set { _angleStep = value; OnPropertyChanged(); } }
 
         private string _instructionText = "步骤1：打开摄像头，点击【拍照】获取基准图。";
         public string InstructionText { get => _instructionText; set { _instructionText = value; OnPropertyChanged(); } }
@@ -72,14 +79,15 @@ namespace FieldScanNew.ViewModels
         public ICommand CalibrateCommand { get; }
         public ICommand JogCommand { get; }
         public ICommand ReadRobotPosCommand { get; }
-        public ICommand ToggleDragCommand { get; }
+        public ICommand ResetRAxisCommand { get; }
+        // [已删除] ToggleDragCommand
 
         public XYCalibViewModel(ProjectData projectData, string projectFolderPath)
         {
             _projectData = projectData;
             _projectFolderPath = projectFolderPath;
             _hardwareService = HardwareService.Instance;
-            _cameraService = new CameraService();
+            _cameraService = CameraService.Instance;
             CameraList = new ObservableCollection<string>(_cameraService.GetCameraList());
             if (CameraList.Count > 0) SelectedCameraIndex = 0;
 
@@ -89,7 +97,9 @@ namespace FieldScanNew.ViewModels
             CalibrateCommand = new RelayCommand(ExecuteCalibrate);
             JogCommand = new RelayCommand(async (param) => await ExecuteJog(param));
             ReadRobotPosCommand = new RelayCommand(async (param) => await ExecuteReadRobotPos(param));
-            ToggleDragCommand = new RelayCommand(async (_) => await ExecuteToggleDrag());
+            ResetRAxisCommand = new RelayCommand(async (_) => await ExecuteResetRAxis());
+
+            // [已删除] ToggleDragCommand 初始化
 
             _cameraService.NewFrameReceived += OnNewFrameReceived;
 
@@ -99,46 +109,59 @@ namespace FieldScanNew.ViewModels
             }
         }
 
-        private async Task ExecuteToggleDrag()
+        public async Task InitializeRobotStateAsync()
+        {
+            if (_hardwareService.ActiveRobot != null && _hardwareService.ActiveRobot.IsConnected)
+            {
+                try
+                {
+                    var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                    if (Math.Abs(pos.R - 90f) > 0.1)
+                    {
+                        await _hardwareService.ActiveRobot.MoveToNoWaitAsync(pos.X, pos.Y, pos.Z, 90f);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"归位失败: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task ExecuteResetRAxis()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
             {
-                MessageBox.Show("机械臂未连接，无法启用拖动示教！", "错误");
+                MessageBox.Show("机械臂未连接！", "错误");
                 return;
             }
 
             try
             {
-                if (!IsDragMode)
-                {
-                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    await _hardwareService.ActiveRobot.SetDragModeAsync(true);
-                    IsDragMode = true;
-                    await Task.Delay(500);
-                    await _hardwareService.ActiveRobot.MoveToNoWaitAsync(currentPos.X, currentPos.Y, currentPos.Z, currentPos.R);
-                }
-                else
-                {
-                    await _hardwareService.ActiveRobot.SetDragModeAsync(false);
-                    IsDragMode = false;
-                }
+                var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, 90f);
             }
-            catch (Exception ex) { MessageBox.Show($"切换拖动模式失败: {ex.Message}", "错误"); IsDragMode = false; }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"重置 R 轴失败: {ex.Message}", "错误");
+            }
         }
+
+        // [已删除] ExecuteToggleDrag 方法
 
         private async Task ExecuteJog(object? parameter)
         {
-            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected) { MessageBox.Show("机械臂未连接！", "错误"); return; }
-
-            string direction = parameter as string ?? "";
-
-            if (IsDragMode && (direction.StartsWith("X") || direction.StartsWith("Y")))
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
             {
-                MessageBox.Show("XY轴已松开，请直接用手拖动。\n若要微调，请先点击锁止按钮。", "提示");
+                MessageBox.Show("机械臂未连接！", "错误");
                 return;
             }
 
-            float x = 0, y = 0, z = 0, r = 0;
+            string direction = parameter as string ?? "";
+
+            // [已删除] 拖动模式下的阻挡逻辑
+
+            float x = 0, y = 0, z = 0;
             switch (direction)
             {
                 case "X+": x = JogStep; break;
@@ -147,99 +170,54 @@ namespace FieldScanNew.ViewModels
                 case "Y-": y = -JogStep; break;
                 case "Z+": z = JogStep; break;
                 case "Z-": z = -JogStep; break;
-                case "R+": r = AngleStep; break;
-                case "R-": r = -AngleStep; break;
             }
 
             try
             {
-                if (IsDragMode)
-                {
-                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
-                    float targetX = currentPos.X + x;
-                    float targetY = currentPos.Y + y;
-                    float targetZ = currentPos.Z + z;
-                    float targetR = currentPos.R + r;
-                    await _hardwareService.ActiveRobot.MoveToNoWaitAsync(targetX, targetY, targetZ, targetR);
-                }
-                else
-                {
-                    await _hardwareService.ActiveRobot.MoveJogAsync(x, y, z, r);
-                }
+                // [修改] 移除了拖动模式判断，直接执行普通的 MoveJogAsync
+                // 注意：R 增量为 0，底层逻辑会维持当前角度（即 90 度）
+                await _hardwareService.ActiveRobot.MoveJogAsync(x, y, z, 0);
             }
             catch (Exception ex) { MessageBox.Show("移动失败: " + ex.Message); }
         }
 
         private async Task ExecuteReadRobotPos(object? parameter)
         {
-            // 校验机械臂连接状态
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected)
             {
                 MessageBox.Show("未连接！", "错误");
                 return;
             }
-
             try
             {
-                // 读取机械臂当前位置
                 var pos = await _hardwareService.ActiveRobot.GetPositionAsync();
 
-                // 保存Z轴高度和R轴角度
+                // 强制记录 R=90
                 _projectData.ScanConfig.ScanHeightZ = pos.Z;
-                _projectData.ScanConfig.ScanAngleR = pos.R;
+                _projectData.ScanConfig.ScanAngleR = 90f;
 
-                // 确定目标点位（1/2），更新对应物理坐标
                 string target = parameter as string ?? "1";
-                if (target == "1")
-                {
-                    PhysicalX1 = pos.X;
-                    PhysicalY1 = pos.Y;
-                }
-                else if (target == "2")
-                {
-                    PhysicalX2 = pos.X;
-                    PhysicalY2 = pos.Y;
-                }
+                if (target == "1") { PhysicalX1 = pos.X; PhysicalY1 = pos.Y; }
+                else if (target == "2") { PhysicalX2 = pos.X; PhysicalY2 = pos.Y; }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show("读取失败: " + ex.Message);
-            }
+            catch (Exception ex) { MessageBox.Show("读取失败: " + ex.Message); }
         }
 
         private void ExecuteCalibrate(object? obj)
         {
-            // 校验选点数量
-            if (_clickStep < 2)
-            {
-                MessageBox.Show("请先选两个点。", "提示");
-                return;
-            }
-
-            // 计算像素坐标差值
+            if (_clickStep < 2) { MessageBox.Show("请先选两个点。", "提示"); return; }
             double dxPix = _pixelP2.X - _pixelP1.X;
-            double dyPix = _pixelP2.Y - _pixelP1.Y; //图像y方向上面小，下面大
-
-            // 计算物理坐标差值
+            double dyPix = _pixelP2.Y - _pixelP1.Y;
             double dxPhy = PhysicalX2 - PhysicalX1;
             double dyPhy = PhysicalY2 - PhysicalY1;
 
-            // 校验两点是否重合
-            if (Math.Abs(dxPix) < 1.0 && Math.Abs(dyPix) < 1.0)
-            {
-                MessageBox.Show("两点重合！", "错误");
-                return;
-            }
+            if (Math.Abs(dxPix) < 1.0 && Math.Abs(dyPix) < 1.0) { MessageBox.Show("两点重合！", "错误"); return; }
 
-            // 计算X/Y轴缩放系数（像素→物理）
             double scaleX = (Math.Abs(dxPix) > 10) ? (dxPhy / dxPix) : 1.0;
             double scaleY = (Math.Abs(dyPix) > 10) ? (dyPhy / dyPix) : 1.0;
-
-            // 计算坐标偏移量
             double offsetX = PhysicalX1 - scaleX * _pixelP1.X;
             double offsetY = PhysicalY1 - scaleY * _pixelP1.Y;
 
-            // 保存校准矩阵和偏移量
             _projectData.MatrixM11 = scaleX;
             _projectData.MatrixM22 = scaleY;
             _projectData.MatrixM12 = 0;
@@ -258,115 +236,26 @@ namespace FieldScanNew.ViewModels
 
             _projectData.IsCalibrated = true;
 
-            //关闭摄像头，避免占用新项目摄像资源
             _cameraService.StopCamera();
             CameraPreviewSource = null;
             IsCameraMode = false;
 
-            // 提示校准成功
-            MessageBox.Show(
-                $"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): {_projectData.ScanConfig.ScanAngleR:F2} °\n旋转角度： {standardAngle} °",
-                "成功"
-            );
+            MessageBox.Show($"校准成功！\n高度(Z): {_projectData.ScanConfig.ScanHeightZ:F2} mm\n角度(R): 90.00 °", "成功");
         }
-        // **修正1：允许随时选点**
+
         public void HandleImageClick(Point pixelPoint)
         {
-            // 删除了 IsCameraMode 的拦截，只要有底图(DutImageSource)就可以选点
             if (DutImageSource == null) return;
-
             if (_clickStep == 0) { _pixelP1 = pixelPoint; ShowP1 = true; OnPropertyChanged(nameof(P1Left)); OnPropertyChanged(nameof(P1Top)); OnPropertyChanged(nameof(PixelP1Text)); _clickStep = 1; InstructionText = "步骤2：请看下方实时画面，移动机械臂到该点上方，记录物理坐标。\n然后点击上方图片【特征点2】。"; }
             else if (_clickStep == 1) { _pixelP2 = pixelPoint; ShowP2 = true; OnPropertyChanged(nameof(P2Left)); OnPropertyChanged(nameof(P2Top)); OnPropertyChanged(nameof(PixelP2Text)); _clickStep = 2; InstructionText = "步骤3：移动机械臂到点2记录坐标，最后点击“计算校准”。"; }
         }
 
         private void ExecuteReset(object? obj) { _clickStep = 0; ShowP1 = false; ShowP2 = false; InstructionText = "步骤1：打开摄像头，点击【拍照】获取基准图。"; }
         private void OnNewFrameReceived(BitmapSource frame) { Application.Current.Dispatcher.Invoke(() => { CameraPreviewSource = frame; }); }
-
-        // **修正2：开关摄像头时不重置已选点**
-        private void ExecuteToggleCamera(object? obj)
-        {
-            if (!IsCameraMode)
-            {
-                if (CameraList.Count == 0) { MessageBox.Show("未检测到摄像头！", "提示"); return; }
-                _cameraService.StartCamera(SelectedCameraIndex);
-                IsCameraMode = true;
-                // ExecuteReset(null); // 删除此行，保留点位
-            }
-            else
-            {
-                _cameraService.StopCamera();
-                IsCameraMode = false;
-                CameraPreviewSource = null;
-            }
-        }
-
-        // **修正3：拍照仅更新底图，不关闭摄像头**
-        private void ExecuteCapture(object? obj)
-        {
-            if (CameraPreviewSource != null)
-            {
-                // 更新静态底图
-                DutImageSource = CameraPreviewSource;
-
-                // 不停止摄像头，不切换模式
-                // _cameraService.StopCamera(); 
-                // IsCameraMode = false; 
-
-                SaveCaptureToFile(DutImageSource);
-            }
-        }
-
-        private void SaveCaptureToFile(BitmapSource image)
-        {
-            try
-            {
-                string imagesFolder = System.IO.Path.Combine(_projectFolderPath, "Images");
-                if (!System.IO.Directory.Exists(imagesFolder))
-                {
-                    System.IO.Directory.CreateDirectory(imagesFolder);
-                }
-
-                string fileName = $"Capture_{DateTime.Now:yyyyMMdd_HHmmss}.jpg";
-                string fullPath = System.IO.Path.Combine(imagesFolder, fileName);
-
-                var encoder = new JpegBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(image));
-
-                using (var stream = new System.IO.FileStream(fullPath, System.IO.FileMode.Create))
-                {
-                    encoder.Save(stream);
-                }
-
-                _projectData.DutImagePath = fullPath;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"保存图片失败: {ex.Message}", "错误");
-            }
-        }
-
-        private void LoadImageFromPath(string path)
-        {
-            try
-            {
-                var bitmap = new BitmapImage();
-                bitmap.BeginInit();
-                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.UriSource = new Uri(path);
-                bitmap.EndInit();
-                bitmap.Freeze();
-
-                DutImageSource = bitmap;
-            }
-            catch
-            {
-                // 忽略加载失败的情况（原代码无处理）
-            }
-        }
-
-        ～XYCalibViewModel()
-        {
-            _cameraService.StopCamera();
-        }
+        private void ExecuteToggleCamera(object? obj) { if (!IsCameraMode) { if (CameraList.Count == 0) { MessageBox.Show("未检测到摄像头！", "提示"); return; } _cameraService.StartCamera(SelectedCameraIndex); IsCameraMode = true; } else { _cameraService.StopCamera(); IsCameraMode = false; CameraPreviewSource = null; } }
+        private void ExecuteCapture(object? obj) { if (CameraPreviewSource != null) { DutImageSource = CameraPreviewSource; SaveCaptureToFile(DutImageSource); } }
+        private void SaveCaptureToFile(BitmapSource image) { try { string imagesFolder = System.IO.Path.Combine(_projectFolderPath, "Images"); if (!System.IO.Directory.Exists(imagesFolder)) System.IO.Directory.CreateDirectory(imagesFolder); string fileName = $"Capture_{DateTime.Now:yyyyMMdd_HHmmss}.jpg"; string fullPath = System.IO.Path.Combine(imagesFolder, fileName); var encoder = new JpegBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); using (var stream = new System.IO.FileStream(fullPath, System.IO.FileMode.Create)) { encoder.Save(stream); } _projectData.DutImagePath = fullPath; } catch (Exception ex) { MessageBox.Show($"保存图片失败: {ex.Message}", "错误"); } }
+        private void LoadImageFromPath(string path) { try { var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(path); bitmap.EndInit(); bitmap.Freeze(); DutImageSource = bitmap; } catch { } }
+        ~XYCalibViewModel() { _cameraService.StopCamera(); }
     }
 }

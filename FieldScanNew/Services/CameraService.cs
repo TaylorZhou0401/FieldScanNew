@@ -6,14 +6,26 @@ using System.Drawing; // 需要引用 System.Drawing.Common 或 AForge 自带的
 using System.IO;
 using System.Windows.Media.Imaging;
 
+// taylorzhou0401/fieldscannew/FieldScanNew-QBC-/FieldScanNew/Services/CameraService.cs
+
 namespace FieldScanNew.Services
 {
     public class CameraService
     {
+        // --- 添加单例实现 ---
+        private static CameraService? _instance;
+        public static CameraService Instance => _instance ??= new CameraService();
+
+        // 将构造函数设为私有
+        private CameraService() { }
+        // ------------------
+
         private FilterInfoCollection? _videoDevices;
         private VideoCaptureDevice? _videoSource;
 
-        // 当有新的一帧图像时触发
+        // 记录当前开启的摄像头索引，避免重复启动
+        private int _currentCameraIndex = -1;
+
         public event Action<BitmapSource>? NewFrameReceived;
 
         public List<string> GetCameraList()
@@ -32,11 +44,18 @@ namespace FieldScanNew.Services
             if (_videoDevices == null || _videoDevices.Count == 0) return;
             if (cameraIndex < 0 || cameraIndex >= _videoDevices.Count) return;
 
+            // 如果请求的摄像头已经是在运行状态，则直接返回，不重新初始化硬件
+            if (_videoSource != null && _videoSource.IsRunning && _currentCameraIndex == cameraIndex)
+            {
+                return;
+            }
+
             StopCamera();
 
             _videoSource = new VideoCaptureDevice(_videoDevices[cameraIndex].MonikerString);
             _videoSource.NewFrame += OnNewFrame;
             _videoSource.Start();
+            _currentCameraIndex = cameraIndex;
         }
 
         public void StopCamera()
@@ -46,6 +65,7 @@ namespace FieldScanNew.Services
                 _videoSource.SignalToStop();
                 _videoSource.NewFrame -= OnNewFrame;
                 _videoSource = null;
+                _currentCameraIndex = -1;
             }
         }
 
@@ -53,19 +73,16 @@ namespace FieldScanNew.Services
         {
             try
             {
-                // AForge 返回的是 System.Drawing.Bitmap
-                // 我们需要将其转换为 WPF 的 BitmapSource
                 using (var bitmap = (Bitmap)eventArgs.Frame.Clone())
                 {
                     var bi = ToBitmapImage(bitmap);
-                    bi.Freeze(); // 必须冻结才能跨线程传递给 UI
+                    bi.Freeze();
                     NewFrameReceived?.Invoke(bi);
                 }
             }
-            catch { /* 忽略转换错误 */ }
+            catch { }
         }
 
-        // 辅助方法：Bitmap -> BitmapImage
         private BitmapImage ToBitmapImage(Bitmap bitmap)
         {
             using (var memory = new MemoryStream())

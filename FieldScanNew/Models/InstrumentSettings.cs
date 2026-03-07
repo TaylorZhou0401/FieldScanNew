@@ -1,4 +1,5 @@
 ﻿using FieldScanNew.Infrastructure;
+using System.Collections.Generic; // 关键：必须引用此命名空间以使用 List
 
 namespace FieldScanNew.Models
 {
@@ -30,7 +31,7 @@ namespace FieldScanNew.Models
         private double _referenceLevelDb = 0;
         public double ReferenceLevelDb { get => _referenceLevelDb; set { _referenceLevelDb = value; OnPropertyChanged(); } }
 
-        // **核心新增：带宽参数 (RBW/VBW)**
+        // 带宽参数 (RBW/VBW)
         // 默认 -1 代表 Auto
         private double _rbwHz = -1;
         public double RbwHz { get => _rbwHz; set { _rbwHz = value; OnPropertyChanged(); } }
@@ -43,5 +44,19 @@ namespace FieldScanNew.Models
 
         private string _vbwUnit = "KHz"; // 默认单位
         public string VbwUnit { get => _vbwUnit; set { _vbwUnit = value; OnPropertyChanged(); } }
+
+        // ==========================================
+        // 核心修复：添加 ProbePoints 属性
+        // ==========================================
+        private List<ProbePoint> _probePoints = new List<ProbePoint>();
+
+        /// <summary>
+        /// 存储探头校准因子的列表 (频率 Hz, 因子 dB)
+        /// </summary>
+        public List<ProbePoint> ProbePoints
+        {
+            get => _probePoints;
+            set { _probePoints = value; OnPropertyChanged(); }
+        }
     }
 }

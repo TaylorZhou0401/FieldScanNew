@@ -12,17 +12,36 @@ namespace FieldScanNew.ViewModels
     public class InstrumentSetupViewModel : ViewModelBase, IStepViewModel
     {
         public string DisplayName => "1. 仪器连接";
+
         private readonly HardwareService _hardwareService;
 
-        // **核心修正：将只读属性改为可读写属性，并添加通知**
         private InstrumentSettings _instrumentSettings;
         public InstrumentSettings InstrumentSettings
         {
             get => _instrumentSettings;
+            set { _instrumentSettings = value; OnPropertyChanged(); }
+        }
+
+        // ==========================================
+        // RobotId 属性：用于前端修改和显示
+        // ==========================================
+        public int RobotId
+        {
+            get
+            {
+                if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
+                {
+                    return robot.RobotId;
+                }
+                return 19; // 默认值
+            }
             set
             {
-                _instrumentSettings = value;
-                OnPropertyChanged(); // 通知界面：设置对象变了
+                if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
+                {
+                    robot.RobotId = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -35,6 +54,9 @@ namespace FieldScanNew.ViewModels
         private string _saStatus = "未连接";
         public string SaStatus { get => _saStatus; set { _saStatus = value; OnPropertyChanged(); } }
 
+        // ==========================================
+        // 列表属性
+        // ==========================================
         public ObservableCollection<string> AvailableRobots { get; }
         public ObservableCollection<string> AvailableDevices { get; }
 
@@ -49,13 +71,17 @@ namespace FieldScanNew.ViewModels
         public ICommand ConnectSaCommand { get; }
         public ICommand DisconnectSaCommand { get; }
 
+        // 构造函数
         public InstrumentSetupViewModel(InstrumentSettings settings)
         {
             _hardwareService = HardwareService.Instance;
-            _instrumentSettings = settings; // 初始化
+            InstrumentSettings = settings ?? new InstrumentSettings();
 
+            // ==========================================
+            // 关键修复：恢复列表初始化
+            // ==========================================
             AvailableRobots = new ObservableCollection<string> { "慧灵科技 Z-Arm 2442" };
-            AvailableDevices = new ObservableCollection<string> { "Spectrum Analyzer (VISA)", "Vector Network Analyzer", "示波器" };
+            AvailableDevices = new ObservableCollection<string> { "Spectrum Analyzer (VISA)" };
 
             ConnectRobotCommand = new RelayCommand(async _ => await ExecuteConnectRobot(), _ => !IsConnecting);
             DisconnectRobotCommand = new RelayCommand(_ => ExecuteDisconnectRobot(), _ => !IsConnecting);
@@ -63,6 +89,11 @@ namespace FieldScanNew.ViewModels
             DisconnectSaCommand = new RelayCommand(_ => ExecuteDisconnectSa(), _ => !IsConnecting);
 
             UpdateStatus();
+        }
+
+        // 无参构造函数（为了兼容性）
+        public InstrumentSetupViewModel() : this(new InstrumentSettings())
+        {
         }
 
         private void UpdateStatus()
@@ -82,13 +113,23 @@ namespace FieldScanNew.ViewModels
                     "慧灵科技 Z-Arm 2442" => new ScaraRobotArm(),
                     _ => throw new NotImplementedException($"机器人 '{SelectedRobot}' 不支持。")
                 };
+
+                // 如果是 ScaraRobotArm，设置 ID
+                if (robot is ScaraRobotArm scara)
+                {
+                    scara.RobotId = this.RobotId; // 确保使用当前界面设置的 ID
+                }
+
                 _hardwareService.SetActiveRobot(robot);
                 await _hardwareService.ActiveRobot!.ConnectAsync();
+
+                // 连接成功后，更新 RobotId 以防它是从底层获取的
+                OnPropertyChanged(nameof(RobotId));
                 RobotStatus = "已连接";
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show("连接机器人失败: " + ex.Message, "错误");
+                MessageBox.Show("连接机器人失败: " + ex.Message, "错误");
                 RobotStatus = "连接失败";
             }
             finally { IsConnecting = false; }
@@ -117,7 +158,7 @@ namespace FieldScanNew.ViewModels
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show("连接频谱仪失败: " + ex.Message, "错误");
+                MessageBox.Show("连接频谱仪失败: " + ex.Message, "错误");
                 SaStatus = "连接失败";
             }
             finally { IsConnecting = false; }

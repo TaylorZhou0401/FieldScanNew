@@ -12,15 +12,21 @@ namespace FieldScanNew.Services
         public bool IsConnected { get; private set; } = false;
         private ControlBeanEx? _robot;
 
+        // ==========================================
+        // 修改：增加 RobotId 属性，默认为 19
+        // ==========================================
+        public int RobotId { get; set; } = 19;
+
         public async Task ConnectAsync()
         {
             if (IsConnected) return;
             await Task.Run(() =>
             {
-                int robotId = 19;//机械臂ID，企业交付版为82
+                // 使用属性 RobotId 代替硬编码的 19
                 TcpserverEx.net_port_initial();
                 Thread.Sleep(3000);
-                _robot = TcpserverEx.get_robot(robotId);
+                _robot = TcpserverEx.get_robot(RobotId);
+
                 for (int i = 0; i < 10; i++)
                 {
                     Thread.Sleep(500);
@@ -32,6 +38,16 @@ namespace FieldScanNew.Services
                 _robot.unlock_position();
                 _robot.set_drag_teach(false);
                 IsConnected = true;
+
+                try
+                {
+                    _robot.get_scara_param();
+                    float currentX = _robot.x;
+                    float currentY = _robot.y;
+                    float currentZ = _robot.z;
+                    _robot.new_movej_xyz_lr(currentX, currentY, currentZ, 90f, 30, 1, currentY > 0 ? 1 : -1);
+                }
+                catch { }
             });
         }
 
@@ -85,8 +101,6 @@ namespace FieldScanNew.Services
             });
         }
 
-        // **核心修正：实现 MoveToNoWaitAsync**
-        // 只发指令，不检查是否到达（专门用于拖动模式下的 Z 轴保持）
         public async Task MoveToNoWaitAsync(float x, float y, float z, float r)
         {
             if (!IsConnected || _robot == null) throw new InvalidOperationException("机器人未连接");
