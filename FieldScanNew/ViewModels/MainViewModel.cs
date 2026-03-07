@@ -515,11 +515,11 @@ namespace FieldScanNew.ViewModels
                     
                     // Error: 采样变化误差允许值（阈值），单位 dBuV/m
                     // 判定标准：当 S_n (RMSE) <= Error 时，认为模型趋于稳定
-                    double Error = 1.0;
+                    double Error = 0.5; // 这个值可以根据实际情况调整，过大可能过早停止，过小可能过度扫描
 
                     // K: 需要连续满足误差标准的次数
                     // 只有连续 K 次满足稳定标准，才停止扫描，防止偶然收敛
-                    int K = 3;
+                    int K = 10;
 
                     // count: 当前连续满足误差标准的计数器
                     // 初始为 0，满足条件 +=1，不满足重置为 0
@@ -659,10 +659,10 @@ namespace FieldScanNew.ViewModels
 
                     string baseName = $"{projectName}_{measurementName}_{componentName}";
                     string subFolder = $"{measurementName}_{componentName}";
-                    SaveScanDataToCsv(selectedProject, sbPeak.ToString(), $"{baseName}_Peak.csv", subFolder);
-                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_FullTrace.csv", subFolder);
-                    if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
-                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_HeatmapOverlay.png", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbPeak.ToString(), $"{baseName}_AI_Peak.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_FullTrace.csv", subFolder);
+                    // if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
+                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_AI_HeatmapOverlay.png", subFolder);
                 }
 
             StopQBC:;
