@@ -3,6 +3,7 @@ using FieldScanNew.Models;
 using FieldScanNew.Services;
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
