@@ -233,7 +233,6 @@ namespace FieldScanNew.ViewModels
             standardAngle = (standardAngle + 360) % 360;
             _projectData.RotateAngle = standardAngle;
 
-
             _projectData.IsCalibrated = true;
 
             _cameraService.StopCamera();

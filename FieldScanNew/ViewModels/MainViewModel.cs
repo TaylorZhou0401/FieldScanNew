@@ -453,13 +453,14 @@ namespace FieldScanNew.ViewModels
                     SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
 
                     var sbPeak = new StringBuilder(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    var sbFull = new StringBuilder(); bool isFullHeaderWritten = false;
 
                     int sumSampleCount = scanSettings.NumX * scanSettings.NumY;
                     int targetSampleCount = (int)Math.Round(3.13 * Math.Pow(sumSampleCount, 0.602));
                     targetSampleCount = Math.Max(4, Math.Min(targetSampleCount, sumSampleCount));
 
                     int initMaxCount = targetSampleCount - 1;
-                    int initPointCount = Math.Max(4, (int)Math.Round(initMaxCount * 0.2));
+                    int initPointCount = Math.Max(4, (int)Math.Round(initMaxCount * 0.25));
                     initPointCount = Math.Min(initPointCount, initMaxCount);
                     int gridCols = (int)Math.Round(Math.Sqrt(initPointCount * (double)scanSettings.NumX / scanSettings.NumY));
                     int gridRows = (int)Math.Round((double)initPointCount / gridCols);
@@ -473,10 +474,11 @@ namespace FieldScanNew.ViewModels
 
                     for (int row = 0; row < gridRows; row++)
                     {
+                        // ... (初始网格扫描代码保持不变) ...
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
                         int yIndex = row * yStepIndex;
                         float targetY = scanSettings.StartY + yIndex * (scanSettings.StopY - scanSettings.StartY) / (scanSettings.NumY - 1);
-
+                        
                         for (int col = 0; col < gridCols; col++)
                         {
                             if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
@@ -487,7 +489,6 @@ namespace FieldScanNew.ViewModels
                             double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
                             if (traceData.Length == 0) continue;
 
-                            // 修正数据 (QBC初始采样)
                             for (int k = 0; k < traceData.Length; k++)
                             {
                                 double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
@@ -498,28 +499,50 @@ namespace FieldScanNew.ViewModels
                             double maxVal = traceData.Max();
                             sampledPoints.Add(new SampledPoint { X = targetX, Y = targetY, Magnitude = maxVal });
 
+                            RecordFullTraceData(ref isFullHeaderWritten, sbFull, targetX, targetY, traceData, startFreq, stopFreq);
+                            
+                            // 更新热力图显示
                             double ratioX = (targetX - xMin) / (xMax - xMin);
                             double ratioY = (targetY - yMin) / (yMax - yMin);
                             int arrayX = Math.Max(0, Math.Min((int)Math.Round(ratioX * (scanSettings.NumX - 1)), scanSettings.NumX - 1));
                             int arrayY = Math.Max(0, Math.Min((int)Math.Round(ratioY * (scanSettings.NumY - 1)), scanSettings.NumY - 1));
                             heatMapData[arrayX, arrayY] = maxVal;
                             HeatmapModel.InvalidatePlot(true);
-
-                            spectrumSeries.Points.Clear();
-                            for (int k = 0; k < traceData.Length; k++)
-                            {
-                                double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
-                                spectrumSeries.Points.Add(new DataPoint(freq, traceData[k]));
-                            }
-                            SpectrumModel.InvalidatePlot(true);
                         }
                     }
 
-                    while (sampledPoints.Count < targetSampleCount)
+                    // --- [Step 1] 参数设定：自适应停止机制 ---
+                    
+                    // Error: 采样变化误差允许值（阈值），单位 dBuV/m
+                    // 判定标准：当 S_n (RMSE) <= Error 时，认为模型趋于稳定
+                    double Error = 0.5; // 这个值可以根据实际情况调整，过大可能过早停止，过小可能过度扫描
+
+                    // K: 需要连续满足误差标准的次数
+                    // 只有连续 K 次满足稳定标准，才停止扫描，防止偶然收敛
+                    int K = 10;
+
+                    // count: 当前连续满足误差标准的计数器
+                    // 初始为 0，满足条件 +=1，不满足重置为 0
+                    int count = 0;
+
+                    // P_prev: 上一次的全场 RBF 插值预测结果 (P_{n-1})
+                    // 用于与当前结果 P_n 计算误差 S_n
+                    double[]? P_prev = null;
+
+                    // maxN: 全局最大点数限制
+                    int maxN = scanSettings.NumX * scanSettings.NumY;
+
+                    // 循环条件：
+                    // 1. count < K: 尚未达到连续 K 次稳定
+                    // 2. sampledPoints.Count < maxN: 未超过最大物理点数
+                    while (count < K && sampledPoints.Count < maxN)
                     {
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
-                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = targetSampleCount }, SampledPoints = sampledPoints };
-                        var nextPointData = CalculateNextSamplePoint(inputData);
+                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = maxN }, SampledPoints = sampledPoints };
+                        
+                        // Use Task.Run to avoid blocking UI during heavy QBC calculation
+                        var nextPointData = await Task.Run(() => CalculateNextSamplePoint(inputData));
+                        
                         if (nextPointData.Status != "success") break;
 
                         float nextX = (float)nextPointData.Next_x;
@@ -540,29 +563,95 @@ namespace FieldScanNew.ViewModels
                         double newMaxVal = newTraceData.Max();
                         sampledPoints.Add(new SampledPoint { X = nextX, Y = nextY, Magnitude = newMaxVal });
 
-                        double ratioX = (nextX - xMin) / (xMax - xMin);
-                        double ratioY = (nextY - yMin) / (yMax - yMin);
-                        int arrayX = Math.Max(0, Math.Min((int)Math.Round(ratioX * (scanSettings.NumX - 1)), scanSettings.NumX - 1));
-                        int arrayY = Math.Max(0, Math.Min((int)Math.Round(ratioY * (scanSettings.NumY - 1)), scanSettings.NumY - 1));
-                        heatMapData[arrayX, arrayY] = newMaxVal;
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, nextX, nextY, newTraceData, startFreq, stopFreq);
+
+                        // --- [Step 2] 全场插值 (P_n) 计算 ---
+                        
+                        // 使用当前所有采样点 (sampledPoints) 来预测全场分布
+                        // filledData: 二维数组 [Nx, Ny]，即 P_n 的网格化表示
+                        // 此过程使用 RBF 均值 (Multiple Kernels) 进行插值，较耗时，放在 Task.Run 中
+                        var (filledData, _) = await Task.Run(() => FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings));
+                        
+                        // 将二维结果展平为一维数组 P_n，方便计算 RMSE
+                        // grid[i, j] -> P_n[index]
+                        int totalPoints = scanSettings.NumX * scanSettings.NumY;
+                        double[] P_n = new double[totalPoints];
+                        for (int j = 0; j < scanSettings.NumY; j++)
+                        {
+                            for (int i = 0; i < scanSettings.NumX; i++)
+                            {
+                                P_n[j * scanSettings.NumX + i] = filledData[i, j];
+                            }
+                        }
+
+                        // --- 误差 S_n 计算 (RMSE) ---
+                        // 若 P_prev 不为空 (即至少是第二次迭代)，则可以计算误差 S_n
+                        if (P_prev != null)
+                        {
+                            // S_n = sqrt( sum((P_n - P_prev)^2) / totalPoints )
+                            double sumSqDiff = 0;
+                            for (int k = 0; k < totalPoints; k++)
+                            {
+                                double diff = P_n[k] - P_prev[k];
+                                sumSqDiff += diff * diff;
+                            }
+                            double Sn = Math.Sqrt(sumSqDiff / totalPoints);
+
+                            // --- [Step 3] 逻辑分支判定 (稳定性检查) ---
+                            // 如果 S_n <= Error: 这一次新增采样对模型影响很小 -> 可能趋于稳定
+                            // 如果 S_n > Error: 这一次新增采样显著改变了模型 -> 尚不稳定
+                            if (Sn <= Error)
+                            {
+                                count++;
+                                // 可以在此增加 Debug 输出或 UI 状态更新: "稳定计数: {count}/{K}, 误差: {Sn:F3}"
+                            }
+                            else
+                            {
+                                count = 0; // 误差较大，前面积累的稳定次数作废，重置计数
+                            }
+                        }
+                        
+                        // 更新 P_prev (即 P_(n-1)) 为当前的 P_n，供下一次迭代使用
+                        P_prev = P_n;
+
+                        // 更新热力图 (使用插值后的完整数据，视觉效果更好，实时看到预测结果)
+                        heatMapSeries.Data = filledData;
                         HeatmapModel.InvalidatePlot(true);
+
+                        spectrumSeries.Points.Clear();
+                        for (int k = 0; k < newTraceData.Length; k++)
+                        {
+                            double freq = startFreq + (double)k * (stopFreq - startFreq) / (newTraceData.Length - 1);
+                            spectrumSeries.Points.Add(new DataPoint(freq, newTraceData[k]));
+                        }
+                        SpectrumModel.InvalidatePlot(true);
                     }
 
-                    var (filledHeatMapData, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
-                    heatMapSeries.Data = filledHeatMapData;
-                    HeatmapModel.InvalidatePlot(true);
+                    // --- [Step 4] 循环结束后的收敛状态报告 ---
+                    string stopReason = (count >= K) 
+                        ? $"模型已收敛 (连续 {K} 次误差 < {Error} dBuV/m)" 
+                        : $"达到最大采样点数 ({maxN})";
+                    
+                    Console.WriteLine($"[{componentName}] QBC 扫描结束: {stopReason}");
+                    Console.WriteLine($"最终采样点数: {sampledPoints.Count} / {maxN}");
 
+                    // 最终再次调用插值函数，确保用于保存的 CSV 数据是基于最终采样点的最佳推测
+                    var (_, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
+                    
                     sbPeak.Clear(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
                     var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
                     var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
 
+                    // Re-calculate fullPointMap explicitly because FillUnsampledPointsWithRbfMean is called inside loop but result not saved for final output
+                    // We need to ensure fullPointMap is populated for CSV saving
                     for (int j = 0; j < scanSettings.NumY; j++)
                     {
-                        float targetY = (float)yCoor[j];
+                        // 保持与 FillUnsampledPointsWithRbfMean 完全一致的坐标精度处理，确保 Key 能匹配
+                        float targetY = (float)Math.Round((float)yCoor[j], 3);
                         for (int i = 0; i < scanSettings.NumX; i++)
                         {
-                            float targetX = (float)xCoor[i];
-                            var key = ((float)Math.Round(targetX, 3), (float)Math.Round(targetY, 3));
+                            float targetX = (float)Math.Round((float)xCoor[i], 3);
+                            var key = (targetX, targetY);
                             double val = fullPointMap.ContainsKey(key) ? fullPointMap[key] : 0;
                             sbPeak.AppendLine($"{targetX:F3},{targetY:F3},{val:F3}");
                         }
@@ -570,9 +659,10 @@ namespace FieldScanNew.ViewModels
 
                     string baseName = $"{projectName}_{measurementName}_{componentName}";
                     string subFolder = $"{measurementName}_{componentName}";
-                    SaveScanDataToCsv(selectedProject, sbPeak.ToString(), $"{baseName}_Peak.csv", subFolder);
-                    if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
-                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_HeatmapOverlay.png", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbPeak.ToString(), $"{baseName}_AI_Peak.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_FullTrace.csv", subFolder);
+                    // if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
+                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_AI_HeatmapOverlay.png", subFolder);
                 }
 
             StopQBC:;
@@ -586,6 +676,33 @@ namespace FieldScanNew.ViewModels
                 { try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); await _hardwareService.ActiveRobot.MoveToAsync(pos.X, pos.Y, pos.Z, 90f); } catch { } }
                 IsScanning = false;
             }
+        }
+
+        /// <summary>
+        /// 记录全频谱轨迹数据到 StringBuilder
+        /// </summary>
+        private void RecordFullTraceData(ref bool isFullHeaderWritten, StringBuilder sbFull, float x, float y, double[] traceData, double startFreq, double stopFreq)
+        {
+            // 如果是第一次记录，先写 CSV 表头（列名：X, Y, 频率1, 频率2...）
+            if (!isFullHeaderWritten)
+            {
+                sbFull.Append("PhysicalX(mm),PhysicalY(mm)");
+                for (int k = 0; k < traceData.Length; k++)
+                {
+                    double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
+                    sbFull.Append($",{freq:F0}Hz");
+                }
+                sbFull.AppendLine();
+                isFullHeaderWritten = true;
+            }
+
+            // 记录当前点的坐标和所有频谱幅值
+            sbFull.Append($"{x:F3},{y:F3}");
+            foreach (var val in traceData)
+            {
+                sbFull.Append($",{val:F3}");
+            }
+            sbFull.AppendLine();
         }
 
         private void SaveScanDataToCsv(ProjectViewModel project, string csvContent, string fileName, string subFolder = "") { try { string dataFolder = Path.Combine(project.ProjectFolderPath, "Data"); if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder); if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder); File.WriteAllText(Path.Combine(dataFolder, fileName), csvContent, Encoding.UTF8); } catch (Exception ex) { MessageBox.Show($"保存失败: {ex.Message}"); } }
@@ -604,19 +721,34 @@ namespace FieldScanNew.ViewModels
                 double[] yObs = sampledPoints.Select(p => p.Magnitude).ToArray();
                 var xCoor = GenerateLinspace(hyperParams.X_min, hyperParams.X_max, hyperParams.Nx);
                 var yCoor = GenerateLinspace(hyperParams.Y_min, hyperParams.Y_max, hyperParams.Ny);
-                var gridPoints = new List<double[]>();
-                foreach (var y in yCoor) { foreach (var x in xCoor) { gridPoints.Add(new[] { x, y }); } }
-                var unselectedPoints = new List<double[]>();
-                foreach (var point in gridPoints)
+
+                // 基于网格索引的最近邻近似：将已采样点映射到最近的网格索引，确保未采样点严格对齐网格
+                var sampledIndices = new HashSet<(int, int)>();
+                double xStep = (hyperParams.Nx > 1) ? (hyperParams.X_max - hyperParams.X_min) / (hyperParams.Nx - 1) : 0;
+                double yStep = (hyperParams.Ny > 1) ? (hyperParams.Y_max - hyperParams.Y_min) / (hyperParams.Ny - 1) : 0;
+
+                foreach (var p in sampledPoints)
                 {
-                    bool isSampled = false;
-                    foreach (var sampled in xObs)
-                    {
-                        double distance = Math.Sqrt(Math.Pow(point[0] - sampled[0], 2) + Math.Pow(point[1] - sampled[1], 2));
-                        if (distance <= 1e-3) { isSampled = true; break; }
-                    }
-                    if (!isSampled) unselectedPoints.Add(point);
+                    int i = (hyperParams.Nx > 1) ? (int)Math.Round(((double)p.X - hyperParams.X_min) / xStep) : 0;
+                    int j = (hyperParams.Ny > 1) ? (int)Math.Round(((double)p.Y - hyperParams.Y_min) / yStep) : 0;
+                    // 边界保护，防止采样点微小越界
+                    i = Math.Max(0, Math.Min(i, hyperParams.Nx - 1));
+                    j = Math.Max(0, Math.Min(j, hyperParams.Ny - 1));
+                    sampledIndices.Add((i, j));
                 }
+
+                var unselectedPoints = new List<double[]>();
+                for (int j = 0; j < hyperParams.Ny; j++)
+                {
+                    for (int i = 0; i < hyperParams.Nx; i++)
+                    {
+                        if (!sampledIndices.Contains((i, j)))
+                        {
+                            unselectedPoints.Add(new[] { xCoor[i], yCoor[j] });
+                        }
+                    }
+                }
+
                 if (unselectedPoints.Count == 0) return new QbcOutputData { Status = "error", Message = "没有可采样的新点了" };
                 var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
                 var predictions = new double[unselectedPoints.Count][];
@@ -636,7 +768,8 @@ namespace FieldScanNew.ViewModels
                 int maxVarIndex = 0; double maxVariance = variances[0];
                 for (int i = 1; i < variances.Length; i++) { if (variances[i] > maxVariance) { maxVariance = variances[i]; maxVarIndex = i; } }
                 var nextPoint = unselectedPoints[maxVarIndex];
-                return new QbcOutputData { Status = "success", Message = "计算成功", Next_x = Math.Round(nextPoint[0], 2), Next_y = Math.Round(nextPoint[1], 2) };
+                // Return exact coordinates to avoid mismatch with grid points (distance check is sensitive)
+                return new QbcOutputData { Status = "success", Message = "计算成功", Next_x = nextPoint[0], Next_y = nextPoint[1] };
             }
             catch (Exception ex) { return new QbcOutputData { Status = "error", Message = $"计算出错：{ex.Message}" }; }
         }
