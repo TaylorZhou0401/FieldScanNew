@@ -79,7 +79,10 @@
             </GroupBox>
 
             <TextBlock Text="{Binding StatusText}" Foreground="Blue" TextWrapping="Wrap" Margin="0,20,0,0"/>
+            <Button Command="{Binding PreviewBoundaryCommand}" Content="{Binding PreviewButtonText}" Margin="10,20,150,0" Padding="10,5" FontSize="14" FontWeight="Bold"/>
+            <TextBlock Text="{Binding PreviewStatusText}" Foreground="Green" TextWrapping="Wrap" Margin="120,-14,20,0"/>
         </StackPanel>
+        
 
         <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Background="#333" ClipToBounds="True">
             <Viewbox Stretch="Uniform">
