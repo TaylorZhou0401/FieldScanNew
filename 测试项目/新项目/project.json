@@ -18,10 +18,10 @@
     "ProbePoints": []
   },
   "ScanConfig": {
-    "StartX": 175.704483,
-    "StartY": -212.721161,
-    "StopX": 287.130035,
-    "StopY": -110.851402,
+    "StartX": 175.690689,
+    "StartY": -211.473236,
+    "StopX": 287.79953,
+    "StopY": -109.697739,
     "NumX": 55,
     "NumY": 50,
     "ScanHeightZ": -9.10000038,
@@ -39,7 +39,8 @@
     "\u002Bx_2mm",
     "\u002Bx_22mm",
     "-z_2mm",
-    "-z_22mm"
+    "-z_22mm",
+    "New Measurement 11"
   ],
   "IsCalibrated": true,
   "MatrixM11": 0.15886112136240668,
