@@ -108,6 +108,7 @@ namespace FieldScanNew.ViewModels
             public int Nx { get; set; }
             public int Ny { get; set; }
             public int Uncertainty_size { get; set; }
+            public double ConvergenceError { get; set; }
         }
 
         public class QbcOutputData
@@ -407,12 +408,25 @@ namespace FieldScanNew.ViewModels
             if (scanSettings.NumX < 2 || scanSettings.NumY < 2) { MessageBox.Show("扫描点数必须大于等于2！", "错误"); return; }
             if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量！", "提示"); return; }
 
+            // 新增: 弹出参数设置窗口获取用户输入
+            double inputError = 0.5;
+            int inputK = 10;
+            var paramsDialog = new QbcParamsDialog(inputError, inputK);
+            if (paramsDialog.ShowDialog() != true) return; // 用户取消
+            inputError = paramsDialog.ErrorVal;
+            inputK = paramsDialog.KVal;
+
             UpdatePlotBackground();
             try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
             catch (Exception ex) { MessageBox.Show($"更新配置失败: {ex.Message}", "警告"); }
 
             IsScanning = true;
             _cancellationTokenSource = new CancellationTokenSource();
+
+            // 新增: 统计计时和总采样点数
+            var stopwatch = Stopwatch.StartNew();
+            int totalSampledPoints = 0;
+            int totalMaxPoints = 0;
 
             var tasks = new List<(string Name, float Angle)>();
             if (scanSettings.ScanHx) tasks.Add(("Hx", 0f));
@@ -515,11 +529,11 @@ namespace FieldScanNew.ViewModels
                     
                     // Error: 采样变化误差允许值（阈值），单位 dBuV/m
                     // 判定标准：当 S_n (RMSE) <= Error 时，认为模型趋于稳定
-                    double Error = 0.5; // 这个值可以根据实际情况调整，过大可能过早停止，过小可能过度扫描
+                    double Error = inputError; // 使用用户输入的 Error
 
                     // K: 需要连续满足误差标准的次数
                     // 只有连续 K 次满足稳定标准，才停止扫描，防止偶然收敛
-                    int K = 10;
+                    int K = inputK; // 使用用户输入的 K
 
                     // count: 当前连续满足误差标准的计数器
                     // 初始为 0，满足条件 +=1，不满足重置为 0
@@ -538,7 +552,7 @@ namespace FieldScanNew.ViewModels
                     while (count < K && sampledPoints.Count < maxN)
                     {
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
-                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = maxN }, SampledPoints = sampledPoints };
+                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = maxN, ConvergenceError = Error }, SampledPoints = sampledPoints };
                         
                         // Use Task.Run to avoid blocking UI during heavy QBC calculation
                         var nextPointData = await Task.Run(() => CalculateNextSamplePoint(inputData));
@@ -632,7 +646,7 @@ namespace FieldScanNew.ViewModels
                         ? $"模型已收敛 (连续 {K} 次误差 < {Error} dBuV/m)" 
                         : $"达到最大采样点数 ({maxN})";
                     
-                    Console.WriteLine($"[{componentName}] QBC 扫描结束: {stopReason}");
+                    Console.WriteLine($"[{componentName}] AI 扫描结束: {stopReason}");
                     Console.WriteLine($"最终采样点数: {sampledPoints.Count} / {maxN}");
 
                     // 最终再次调用插值函数，确保用于保存的 CSV 数据是基于最终采样点的最佳推测
@@ -663,10 +677,25 @@ namespace FieldScanNew.ViewModels
                     SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_FullTrace.csv", subFolder);
                     // if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
                     SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_AI_HeatmapOverlay.png", subFolder);
+
+                    // 计算全局范围，确保散点图与热力图颜色一致
+                    double globalMin = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Min() : 0;
+                    double globalMax = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Max() : 100;
+                    if (Math.Abs(globalMax - globalMin) < 0.001) { globalMin -= 1; globalMax += 1; }
+
+                    // 新增: 保存AI采样点分布图并累计统计数据
+                    SaveSamplingDistributionImage(selectedProject, sampledPoints, xMin, xMax, yMin, yMax, $"{baseName}_SamplingPoints.png", subFolder, globalMin, globalMax);
+                    totalSampledPoints += sampledPoints.Count;
+                    totalMaxPoints += maxN;
                 }
 
             StopQBC:;
-                if (!_cancellationTokenSource.Token.IsCancellationRequested) MessageBox.Show("QBC 扫描完成！", "成功");
+                stopwatch.Stop();
+                if (!_cancellationTokenSource.Token.IsCancellationRequested) 
+                {
+                    string msg = $"AI 扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}\n采样点数: {totalSampledPoints} / {totalMaxPoints}";
+                    MessageBox.Show(msg, "成功");
+                }
                 else MessageBox.Show("扫描已停止。", "提示");
             }
             catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
@@ -708,6 +737,57 @@ namespace FieldScanNew.ViewModels
         private void SaveScanDataToCsv(ProjectViewModel project, string csvContent, string fileName, string subFolder = "") { try { string dataFolder = Path.Combine(project.ProjectFolderPath, "Data"); if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder); if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder); File.WriteAllText(Path.Combine(dataFolder, fileName), csvContent, Encoding.UTF8); } catch (Exception ex) { MessageBox.Show($"保存失败: {ex.Message}"); } }
         private void SaveImage(ProjectViewModel project, BitmapSource image, string fileName, string subFolder = "") { try { string dataFolder = Path.Combine(project.ProjectFolderPath, "Data"); if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder); if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder); string fullPath = Path.Combine(dataFolder, fileName); var encoder = new JpegBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); using (var stream = new FileStream(fullPath, FileMode.Create)) { encoder.Save(stream); } } catch (Exception ex) { Console.WriteLine($"保存图片失败: {ex.Message}"); } }
         private void SaveHeatmapImage(ProjectViewModel project, PlotModel model, string fileName, string subFolder = "") { try { string dataFolder = Path.Combine(project.ProjectFolderPath, "Data"); if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder); if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder); string fullPath = Path.Combine(dataFolder, fileName); Application.Current.Dispatcher.Invoke(() => { var exporter = new PngExporter { Width = 1000, Height = 750 }; exporter.ExportToFile(model, fullPath); }); } catch (Exception ex) { Console.WriteLine($"保存热力图失败: {ex.Message}"); } }
+
+        private void SaveSamplingDistributionImage(ProjectViewModel project, List<SampledPoint> points, double xMin, double xMax, double yMin, double yMax, string fileName, string subFolder = "", double? globalMin = null, double? globalMax = null)
+        {
+            try
+            {
+                string dataFolder = Path.Combine(project.ProjectFolderPath, "Data");
+                if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder);
+                if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder);
+                string fullPath = Path.Combine(dataFolder, fileName);
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var model = new PlotModel { Title = "AI采样点分布" };
+                    model.PlotType = PlotType.Cartesian;
+                    model.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, Title = "Physical X (mm)", Minimum = xMin, Maximum = xMax });
+                    model.Axes.Add(new LinearAxis { Position = AxisPosition.Left, Title = "Physical Y (mm)", Minimum = yMin, Maximum = yMax });
+
+                    var scatterSeries = new ScatterSeries { MarkerType = MarkerType.Circle, MarkerSize = 4, MarkerStroke = OxyColors.Black, MarkerStrokeThickness = 0.5 };
+                    
+                    var palette = OxyPalettes.Jet(100);
+                    // 如果指定了全局最大最小值，使用该范围；否则使用点数据的范围
+                    double axisMin = globalMin ?? (points.Count > 0 ? points.Min(p => p.Magnitude) : 0);
+                    double axisMax = globalMax ?? (points.Count > 0 ? points.Max(p => p.Magnitude) : 100);
+                    
+                    if (points.Count > 0 && globalMin == null && globalMax == null)
+                    {
+                         // 如果没有指定，且有数据，确保Min < Max
+                         if (Math.Abs(axisMax - axisMin) < 0.001) { axisMin -= 1; axisMax += 1; }
+                    }
+
+                    model.Axes.Add(new LinearColorAxis { Position = AxisPosition.Right, Palette = palette, Minimum = axisMin, Maximum = axisMax, Title = "Strength" });
+
+                    if (points.Count > 0)
+                    {
+                        foreach (var p in points)
+                        {
+                            scatterSeries.Points.Add(new ScatterPoint(p.X, p.Y) { Value = p.Magnitude });
+                        }
+                    }
+
+                    model.Series.Add(scatterSeries);
+
+                    var exporter = new PngExporter { Width = 1000, Height = 750 };
+                    exporter.ExportToFile(model, fullPath);
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"保存采样分布图失败: {ex.Message}");
+            }
+        }
         private void ExecuteStopScan() { _cancellationTokenSource?.Cancel(); }
 
         private static QbcOutputData CalculateNextSamplePoint(QbcInputData inputData)
@@ -767,7 +847,46 @@ namespace FieldScanNew.ViewModels
                 }
                 int maxVarIndex = 0; double maxVariance = variances[0];
                 for (int i = 1; i < variances.Length; i++) { if (variances[i] > maxVariance) { maxVariance = variances[i]; maxVarIndex = i; } }
-                var nextPoint = unselectedPoints[maxVarIndex];
+
+                double[] nextPoint;
+                // 混合采样策略：如果最大方差过小 (说明所有模型意见一致，可能陷入局部最优或平坦区)
+                // 强制进行"距离探索" (Distance-based Exploration)，选择距离现有采样点最远的点
+                // 阈值 setting: 与 ConvergenceError 关联，使得对高精度要求的任务同样有更敏感的探索
+                // 使用 0.2 系数，例如 Error=0.5时 Threshold=0.1 (Variance=0.01)
+                double stdDevThreshold = hyperParams.ConvergenceError * 0.2;
+                double varianceThreshold = stdDevThreshold * stdDevThreshold;
+                
+                if (maxVariance < varianceThreshold)
+                {
+                    int bestDistIndex = -1;
+                    double bestMinDistSq = -1.0;
+
+                    for (int i = 0; i < unselectedPoints.Count; i++)
+                    {
+                        var candidate = unselectedPoints[i];
+                        // 计算该候选点到所有已采样点的最小距离
+                        double currentMinDistSq = double.MaxValue;
+                        for (int k = 0; k < xObs.Length; k++)
+                        {
+                            double distSq = Math.Pow(candidate[0] - xObs[k][0], 2) + Math.Pow(candidate[1] - xObs[k][1], 2);
+                            if (distSq < currentMinDistSq) currentMinDistSq = distSq;
+                        }
+
+                        // 我们要找"最小距离"最大的那个点 (即离大家最远的点)
+                        if (currentMinDistSq > bestMinDistSq)
+                        {
+                            bestMinDistSq = currentMinDistSq;
+                            bestDistIndex = i;
+                        }
+                    }
+                    if (bestDistIndex != -1) nextPoint = unselectedPoints[bestDistIndex];
+                    else nextPoint = unselectedPoints[maxVarIndex]; // Should not happen
+                }
+                else
+                {
+                    nextPoint = unselectedPoints[maxVarIndex];
+                }
+
                 // Return exact coordinates to avoid mismatch with grid points (distance check is sensitive)
                 return new QbcOutputData { Status = "success", Message = "计算成功", Next_x = nextPoint[0], Next_y = nextPoint[1] };
             }
