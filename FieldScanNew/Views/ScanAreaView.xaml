@@ -15,7 +15,7 @@
         </Grid.ColumnDefinitions>
 
         <StackPanel Grid.Column="0" Margin="0,0,20,0">
-            <TextBlock Text="5. 扫描区域配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
+            <!--<TextBlock Text="5. 扫描区域配置" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/> -->
 
             <GroupBox Header="物理坐标范围 (mm)" Padding="10">
                 <Grid>
@@ -80,7 +80,7 @@
 
             <TextBlock Text="{Binding StatusText}" Foreground="Blue" TextWrapping="Wrap" Margin="0,20,0,0"/>
             <Button Command="{Binding PreviewBoundaryCommand}" Content="{Binding PreviewButtonText}" Margin="10,20,150,0" Padding="10,5" FontSize="14" FontWeight="Bold"/>
-            <TextBlock Text="{Binding PreviewStatusText}" Foreground="Green" TextWrapping="Wrap" Margin="120,-14,20,0"/>
+            <TextBlock Text="{Binding PreviewStatusText}" Foreground="Green" TextWrapping="Wrap" Margin="120,-14,20,0" FontSize="14" FontWeight="Light"/>
         </StackPanel>
         
 
