@@ -470,12 +470,13 @@ namespace FieldScanNew.ViewModels
                     var sbFull = new StringBuilder(); bool isFullHeaderWritten = false;
 
                     int sumSampleCount = scanSettings.NumX * scanSettings.NumY;
-                    int targetSampleCount = (int)Math.Round(3.13 * Math.Pow(sumSampleCount, 0.602));
+                    //取消公式计算，直接采用总点数比例来确定初始点数，确保在不同规模的扫描区域都能有合理的初始采样密度
+                    /* int targetSampleCount = (int)Math.Round(3.13 * Math.Pow(sumSampleCount, 0.602));
                     targetSampleCount = Math.Max(4, Math.Min(targetSampleCount, sumSampleCount));
 
-                    int initMaxCount = targetSampleCount - 1;
-                    int initPointCount = Math.Max(4, (int)Math.Round(initMaxCount * 0.25));
-                    initPointCount = Math.Min(initPointCount, initMaxCount);
+                    int initMaxCount = targetSampleCount - 1; */
+                    int initPointCount = Math.Max(4, (int)Math.Round(sumSampleCount * 0.2)); // 初始采样点数设为总点数的20%，确保足够的初始数据支持QBC迭代
+                    initPointCount = Math.Min(initPointCount, sumSampleCount);
                     int gridCols = (int)Math.Round(Math.Sqrt(initPointCount * (double)scanSettings.NumX / scanSettings.NumY));
                     int gridRows = (int)Math.Round((double)initPointCount / gridCols);
                     gridCols = Math.Max(2, Math.Min(gridCols, scanSettings.NumX));
