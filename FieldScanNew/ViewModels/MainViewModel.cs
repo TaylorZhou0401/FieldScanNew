@@ -109,6 +109,7 @@ namespace FieldScanNew.ViewModels
             public int Ny { get; set; }
             public int Uncertainty_size { get; set; }
             public double ConvergenceError { get; set; }
+            public double StdDevCoef { get; set; }
         }
 
         public class QbcOutputData
@@ -411,10 +412,14 @@ namespace FieldScanNew.ViewModels
             // 新增: 弹出参数设置窗口获取用户输入
             double inputError = 0.5;
             int inputK = 10;
-            var paramsDialog = new QbcParamsDialog(inputError, inputK);
+            double inputInitRatio = 0.15;
+            double inputStdDevCoef = 0.2;
+            var paramsDialog = new QbcParamsDialog(inputError, inputK, inputInitRatio, inputStdDevCoef);
             if (paramsDialog.ShowDialog() != true) return; // 用户取消
             inputError = paramsDialog.ErrorVal;
             inputK = paramsDialog.KVal;
+            inputInitRatio = paramsDialog.InitRatioVal;
+            inputStdDevCoef = paramsDialog.StdDevCoefVal;
 
             UpdatePlotBackground();
             try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
@@ -470,60 +475,109 @@ namespace FieldScanNew.ViewModels
                     var sbFull = new StringBuilder(); bool isFullHeaderWritten = false;
 
                     int sumSampleCount = scanSettings.NumX * scanSettings.NumY;
-                    //取消公式计算，直接采用总点数比例来确定初始点数，确保在不同规模的扫描区域都能有合理的初始采样密度
-                    /* int targetSampleCount = (int)Math.Round(3.13 * Math.Pow(sumSampleCount, 0.602));
-                    targetSampleCount = Math.Max(4, Math.Min(targetSampleCount, sumSampleCount));
-
-                    int initMaxCount = targetSampleCount - 1; */
-                    int initPointCount = Math.Max(4, (int)Math.Round(sumSampleCount * 0.2)); // 初始采样点数设为总点数的20%，确保足够的初始数据支持QBC迭代
+                    int initPointCount = Math.Max(4, (int)Math.Round(sumSampleCount * inputInitRatio)); // 使用用户输入的初始采样比例
                     initPointCount = Math.Min(initPointCount, sumSampleCount);
-                    int gridCols = (int)Math.Round(Math.Sqrt(initPointCount * (double)scanSettings.NumX / scanSettings.NumY));
-                    int gridRows = (int)Math.Round((double)initPointCount / gridCols);
-                    gridCols = Math.Max(2, Math.Min(gridCols, scanSettings.NumX));
-                    gridRows = Math.Max(2, Math.Min(gridRows, scanSettings.NumY));
 
-                    int xStepIndex = (scanSettings.NumX - 1) / (gridCols - 1);
-                    int yStepIndex = (scanSettings.NumY - 1) / (gridRows - 1);
+                    Console.WriteLine($"[Initialization] Starting greedy scan (FPS) for {initPointCount} points...");
+
+                    var allGridPoints = new List<(float X, float Y)>();
+                    for (int j = 0; j < scanSettings.NumY; j++)
+                    {
+                        float targetY = scanSettings.StartY + j * (scanSettings.StopY - scanSettings.StartY) / Math.Max(1, scanSettings.NumY - 1);
+                        for (int i = 0; i < scanSettings.NumX; i++)
+                        {
+                            float targetX = scanSettings.StartX + i * (scanSettings.StopX - scanSettings.StartX) / Math.Max(1, scanSettings.NumX - 1);
+                            allGridPoints.Add((targetX, targetY));
+                        }
+                    }
+
+                    var selectedIndices = new HashSet<int>();
+                    var distancesSq = Enumerable.Repeat(double.MaxValue, allGridPoints.Count).ToArray();
+                    int firstIndex = (scanSettings.NumY / 2) * scanSettings.NumX + (scanSettings.NumX / 2);
+
+                    // 1. 离线使用贪婪算法（FPS）选出所有初始规划采样点
+                    var plannedPoints = new List<(float X, float Y)>();
+
+                    for (int step = 0; step < initPointCount; step++)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
+
+                        int nextIndex = -1;
+                        if (step == 0)
+                        {
+                            nextIndex = firstIndex;
+                        }
+                        else
+                        {
+                            double maxMinDistSq = -1;
+                            for (int i = 0; i < allGridPoints.Count; i++)
+                            {
+                                if (!selectedIndices.Contains(i) && distancesSq[i] > maxMinDistSq)
+                                {
+                                    maxMinDistSq = distancesSq[i];
+                                    nextIndex = i;
+                                }
+                            }
+                        }
+
+                        selectedIndices.Add(nextIndex);
+                        var p = allGridPoints[nextIndex];
+                        plannedPoints.Add(p);
+
+                        for (int i = 0; i < allGridPoints.Count; i++)
+                        {
+                            if (!selectedIndices.Contains(i))
+                            {
+                                double dx = allGridPoints[i].X - p.X;
+                                double dy = allGridPoints[i].Y - p.Y;
+                                double distSq = dx * dx + dy * dy;
+                                if (distSq < distancesSq[i])
+                                {
+                                    distancesSq[i] = distSq;
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 对规划好的点按行排序：Y依次增大，同Y下X依次增大（加入Math.Round规避浮点计算微小误差）
+                    var sortedPoints = plannedPoints
+                        .OrderBy(p => Math.Round(p.Y, 3))
+                        .ThenBy(p => Math.Round(p.X, 3))
+                        .ToList();
 
                     List<SampledPoint> sampledPoints = new List<SampledPoint>();
 
-                    for (int row = 0; row < gridRows; row++)
+                    // 3. 实际平滑移动并采样
+                    foreach (var pt in sortedPoints)
                     {
-                        // ... (初始网格扫描代码保持不变) ...
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
-                        int yIndex = row * yStepIndex;
-                        float targetY = scanSettings.StartY + yIndex * (scanSettings.StopY - scanSettings.StartY) / (scanSettings.NumY - 1);
-                        
-                        for (int col = 0; col < gridCols; col++)
+
+                        float targetX = pt.X;
+                        float targetY = pt.Y;
+
+                        await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, robotAngle);
+                        double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                        if (traceData.Length == 0) continue;
+
+                        for (int k = 0; k < traceData.Length; k++)
                         {
-                            if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
-                            int xIndex = col * xStepIndex;
-                            float targetX = scanSettings.StartX + xIndex * (scanSettings.StopX - scanSettings.StartX) / (scanSettings.NumX - 1);
-
-                            await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, robotAngle);
-                            double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
-                            if (traceData.Length == 0) continue;
-
-                            for (int k = 0; k < traceData.Length; k++)
-                            {
-                                double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
-                                double factor = GetInterpolatedFactor(freq);
-                                traceData[k] = traceData[k] + 107.0 + factor;
-                            }
-
-                            double maxVal = traceData.Max();
-                            sampledPoints.Add(new SampledPoint { X = targetX, Y = targetY, Magnitude = maxVal });
-
-                            RecordFullTraceData(ref isFullHeaderWritten, sbFull, targetX, targetY, traceData, startFreq, stopFreq);
-                            
-                            // 更新热力图显示
-                            double ratioX = (targetX - xMin) / (xMax - xMin);
-                            double ratioY = (targetY - yMin) / (yMax - yMin);
-                            int arrayX = Math.Max(0, Math.Min((int)Math.Round(ratioX * (scanSettings.NumX - 1)), scanSettings.NumX - 1));
-                            int arrayY = Math.Max(0, Math.Min((int)Math.Round(ratioY * (scanSettings.NumY - 1)), scanSettings.NumY - 1));
-                            heatMapData[arrayX, arrayY] = maxVal;
-                            HeatmapModel.InvalidatePlot(true);
+                            double freq = startFreq + (double)k * (stopFreq - startFreq) / (traceData.Length - 1);
+                            double factor = GetInterpolatedFactor(freq);
+                            traceData[k] = traceData[k] + 107.0 + factor;
                         }
+
+                        double maxVal = traceData.Max();
+                        sampledPoints.Add(new SampledPoint { X = targetX, Y = targetY, Magnitude = maxVal });
+
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, targetX, targetY, traceData, startFreq, stopFreq);
+
+                        // 更新热力图显示
+                        double ratioX = (targetX - xMin) / (xMax - xMin);
+                        double ratioY = (targetY - yMin) / (yMax - yMin);
+                        int arrayX = Math.Max(0, Math.Min((int)Math.Round(ratioX * (scanSettings.NumX - 1)), scanSettings.NumX - 1));
+                        int arrayY = Math.Max(0, Math.Min((int)Math.Round(ratioY * (scanSettings.NumY - 1)), scanSettings.NumY - 1));
+                        heatMapData[arrayX, arrayY] = maxVal;
+                        HeatmapModel.InvalidatePlot(true);
                     }
 
                     // --- [Step 1] 参数设定：自适应停止机制 ---
@@ -553,8 +607,8 @@ namespace FieldScanNew.ViewModels
                     while (count < K && sampledPoints.Count < maxN)
                     {
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
-                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = maxN, ConvergenceError = Error }, SampledPoints = sampledPoints };
-                        
+                        var inputData = new QbcInputData { HyperParams = new HyperParams { X_min = xMin, X_max = xMax, Y_min = yMin, Y_max = yMax, Nx = scanSettings.NumX, Ny = scanSettings.NumY, Uncertainty_size = maxN, ConvergenceError = Error, StdDevCoef = inputStdDevCoef }, SampledPoints = sampledPoints };
+
                         // Use Task.Run to avoid blocking UI during heavy QBC calculation
                         var nextPointData = await Task.Run(() => CalculateNextSamplePoint(inputData));
                         
@@ -853,11 +907,10 @@ namespace FieldScanNew.ViewModels
                 // 混合采样策略：如果最大方差过小 (说明所有模型意见一致，可能陷入局部最优或平坦区)
                 // 强制进行"距离探索" (Distance-based Exploration)，选择距离现有采样点最远的点
                 // 阈值 setting: 与 ConvergenceError 关联，使得对高精度要求的任务同样有更敏感的探索
-                // 使用 0.2 系数，例如 Error=0.5时 Threshold=0.1 (Variance=0.01)
-                double stdDevThreshold = hyperParams.ConvergenceError * 0.2;
-                double varianceThreshold = stdDevThreshold * stdDevThreshold;
-                
-                if (maxVariance < varianceThreshold)
+                // 系数由用户输入提供
+                double stdDevThreshold = hyperParams.ConvergenceError * hyperParams.StdDevCoef;
+
+                if (maxVariance < stdDevThreshold)
                 {
                     int bestDistIndex = -1;
                     double bestMinDistSq = -1.0;
