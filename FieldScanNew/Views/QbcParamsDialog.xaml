@@ -1,7 +1,7 @@
 <Window x:Class="FieldScanNew.Views.QbcParamsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="QBC扫描参数设置" Height="350" Width="350" WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+        Title="AI扫描设置" Height="350" Width="350" WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -21,7 +21,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="收敛误差 (dBuV/m):" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox x:Name="TxtError" Grid.Column="1" Text="0.5" VerticalAlignment="Center" Padding="5"/>
+            <TextBox x:Name="TxtError" Grid.Column="1" Text="0.15" VerticalAlignment="Center" Padding="5"/>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,0,0,15">
@@ -30,7 +30,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="连续稳定次数 (K):  " VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox x:Name="TxtK" Grid.Column="1" Text="10" VerticalAlignment="Center" Padding="5"/>
+            <TextBox x:Name="TxtK" Grid.Column="1" Text="15" VerticalAlignment="Center" Padding="5"/>
         </Grid>
 
         <Grid Grid.Row="3" Margin="0,0,0,15">
@@ -39,7 +39,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="初始采样比例:      " VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox x:Name="TxtInitRatio" Grid.Column="1" Text="0.15" VerticalAlignment="Center" Padding="5"/>
+            <TextBox x:Name="TxtInitRatio" Grid.Column="1" Text="0.1" VerticalAlignment="Center" Padding="5"/>
         </Grid>
 
         <Grid Grid.Row="4" Margin="0,0,0,15">
@@ -50,6 +50,29 @@
             <TextBlock Text="探索标准差系数:  " VerticalAlignment="Center" Margin="0,0,10,0"/>
             <TextBox x:Name="TxtStdDevCoef" Grid.Column="1" Text="0.2" VerticalAlignment="Center" Padding="5"/>
         </Grid>
+
+        <!-- 动态显示说明文字 -->
+        <TextBlock Grid.Row="5" TextWrapping="Wrap" Foreground="#555555" Margin="0,0,0,15" VerticalAlignment="Top">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Text" Value="说明: 请点击上方输入框以查看对应的参数说明。" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ElementName=TxtError, Path=IsKeyboardFocusWithin}" Value="True">
+                            <Setter Property="Text" Value="说明: 设定的目标收敛误差阈值。当预测误差低于此值且保持稳定时，扫描将提前结束。(建议范围: 0.05 ~ 0.5)" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding ElementName=TxtK, Path=IsKeyboardFocusWithin}" Value="True">
+                            <Setter Property="Text" Value="说明: 误差需要连续低于阈值的次数。数值越大结果越可靠，但扫描耗时会相应增加。(建议范围: 5 ~ 20)" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding ElementName=TxtInitRatio, Path=IsKeyboardFocusWithin}" Value="True">
+                            <Setter Property="Text" Value="说明: 初始贪婪采样的点数占总扫描点数的比例。合理的比例能建立较准的初始AI模型。(建议范围: 0.1 ~ 0.4)" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding ElementName=TxtStdDevCoef, Path=IsKeyboardFocusWithin}" Value="True">
+                            <Setter Property="Text" Value="说明: 控制主动学习的探索程度。系数越大，算法越倾向于在特征不确定的未知区域进行采样。(建议范围: 0.1 ~ 1.0)" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
 
         <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="确认并开始" Click="BtnConfirm_Click" Width="100" Padding="5" Margin="0,0,10,0" Background="#007ACC" Foreground="White"/>

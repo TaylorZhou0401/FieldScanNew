@@ -271,6 +271,9 @@ namespace FieldScanNew.ViewModels
 
             IsScanning = true;
             _cancellationTokenSource = new CancellationTokenSource();
+            var stopwatch = Stopwatch.StartNew();
+            // 稳定延时（ms）: 机器人到位后等待该时间再开始测量，避免未稳态读数
+            int settleDelayMs = 100;
 
             var tasks = new List<(string Name, float Angle)>();
             if (scanSettings.ScanHx) tasks.Add(("Hx", 0f));
@@ -295,6 +298,8 @@ namespace FieldScanNew.ViewModels
 
                     var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
                     await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, robotAngle);
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                    await Task.Delay(settleDelayMs);
 
                     double xMin = Math.Min(scanSettings.StartX, scanSettings.StopX);
                     double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
@@ -324,6 +329,8 @@ namespace FieldScanNew.ViewModels
                             float targetY = scanSettings.StartY + j * (scanSettings.StopY - scanSettings.StartY) / (scanSettings.NumY - 1);
 
                             await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, robotAngle);
+                            if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopScanLabel;
+                            await Task.Delay(settleDelayMs);
                             double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
 
                             if (traceData.Length > 0)
@@ -384,8 +391,15 @@ namespace FieldScanNew.ViewModels
                 }
 
             StopScanLabel:;
-                if (!_cancellationTokenSource.Token.IsCancellationRequested) MessageBox.Show("所有选定分量扫描完成！", "成功");
-                else MessageBox.Show("扫描已停止。", "提示");
+                stopwatch.Stop();
+                if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    MessageBox.Show($"所有选定分量扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "成功");
+                }
+                else
+                {
+                    MessageBox.Show($"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "提示");
+                }
             }
             catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
             finally
@@ -410,9 +424,9 @@ namespace FieldScanNew.ViewModels
             if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量！", "提示"); return; }
 
             // 新增: 弹出参数设置窗口获取用户输入
-            double inputError = 0.5;
-            int inputK = 10;
-            double inputInitRatio = 0.15;
+            double inputError = 0.15;
+            int inputK = 15;
+            double inputInitRatio = 0.1;
             double inputStdDevCoef = 0.2;
             var paramsDialog = new QbcParamsDialog(inputError, inputK, inputInitRatio, inputStdDevCoef);
             if (paramsDialog.ShowDialog() != true) return; // 用户取消
@@ -430,6 +444,8 @@ namespace FieldScanNew.ViewModels
 
             // 新增: 统计计时和总采样点数
             var stopwatch = Stopwatch.StartNew();
+            // 稳定延时（ms）: 机器人到位后等待该时间再开始测量，避免未稳态读数
+            int settleDelayMs = 100;
             int totalSampledPoints = 0;
             int totalMaxPoints = 0;
 
@@ -456,6 +472,8 @@ namespace FieldScanNew.ViewModels
 
                     var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
                     await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, robotAngle);
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                    await Task.Delay(settleDelayMs);
 
                     double xMin = Math.Min(scanSettings.StartX, scanSettings.StopX);
                     double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
@@ -556,6 +574,8 @@ namespace FieldScanNew.ViewModels
                         float targetY = pt.Y;
 
                         await _hardwareService.ActiveRobot.MoveToAsync(targetX, targetY, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
+                        await Task.Delay(settleDelayMs);
                         double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
                         if (traceData.Length == 0) continue;
 
@@ -618,6 +638,8 @@ namespace FieldScanNew.ViewModels
                         float nextY = (float)nextPointData.Next_y;
 
                         await _hardwareService.ActiveRobot.MoveToAsync(nextX, nextY, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
+                        await Task.Delay(settleDelayMs);
                         double[] newTraceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
                         if (newTraceData.Length == 0) continue;
 
@@ -751,7 +773,11 @@ namespace FieldScanNew.ViewModels
                     string msg = $"AI 扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}\n采样点数: {totalSampledPoints} / {totalMaxPoints}";
                     MessageBox.Show(msg, "成功");
                 }
-                else MessageBox.Show("扫描已停止。", "提示");
+                else
+                {
+                    string msg = $"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}\n采样点数: {totalSampledPoints} / {totalMaxPoints}";
+                    MessageBox.Show(msg, "提示");
+                }
             }
             catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
             finally
