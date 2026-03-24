@@ -9,7 +9,7 @@ namespace FieldScanNew.Views
         public double InitRatioVal { get; private set; }
         public double StdDevCoefVal { get; private set; }
 
-        public QbcParamsDialog(double defaultError = 0.5, int defaultK = 10, double defaultInitRatio = 0.15, double defaultStdDevCoef = 0.2)
+        public QbcParamsDialog(double defaultError = 0.15, int defaultK = 15, double defaultInitRatio = 0.1, double defaultStdDevCoef = 0.2)
         {
             InitializeComponent();
             TxtError.Text = defaultError.ToString("F2");
