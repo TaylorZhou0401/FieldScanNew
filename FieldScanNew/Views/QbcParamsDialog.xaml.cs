@@ -7,28 +7,24 @@ namespace FieldScanNew.Views
         public double ErrorVal { get; private set; }
         public int KVal { get; private set; }
         public double InitRatioVal { get; private set; }
-        public double StdDevCoefVal { get; private set; }
 
-        public QbcParamsDialog(double defaultError = 0.15, int defaultK = 15, double defaultInitRatio = 0.1, double defaultStdDevCoef = 0.2)
+        public QbcParamsDialog(double defaultError = 0.2, int defaultK = 3, double defaultInitRatio = 0.1)
         {
             InitializeComponent();
             TxtError.Text = defaultError.ToString("F2");
             TxtK.Text = defaultK.ToString();
             TxtInitRatio.Text = defaultInitRatio.ToString("F2");
-            TxtStdDevCoef.Text = defaultStdDevCoef.ToString("F2");
         }
 
         private void BtnConfirm_Click(object sender, RoutedEventArgs e)
         {
             if (double.TryParse(TxtError.Text, out double err) && 
                 int.TryParse(TxtK.Text, out int k) &&
-                double.TryParse(TxtInitRatio.Text, out double initRatio) &&
-                double.TryParse(TxtStdDevCoef.Text, out double stdDevCoef))
+                double.TryParse(TxtInitRatio.Text, out double initRatio))
             {
                 ErrorVal = err;
                 KVal = k;
                 InitRatioVal = initRatio;
-                StdDevCoefVal = stdDevCoef;
                 DialogResult = true;
                 Close();
             }
