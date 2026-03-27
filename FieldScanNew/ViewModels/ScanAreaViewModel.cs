@@ -1,7 +1,11 @@
 ﻿using FieldScanNew.Infrastructure;
 using FieldScanNew.Models;
+using FieldScanNew.Services;
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows; // 引用 Point, Rect
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 
 using MessageBox = System.Windows.MessageBox;
@@ -34,10 +38,101 @@ namespace FieldScanNew.ViewModels
         private string _statusText = "请在图片上【按住鼠标左键拖拽】以框选扫描区域。";
         public string StatusText { get => _statusText; set { _statusText = value; OnPropertyChanged(); } }
 
+        private string _previewStatusText = "";
+        public string PreviewStatusText { get => _previewStatusText; set { _previewStatusText = value; OnPropertyChanged(); } }
+
+        private string _previewButtonText = "预览扫描边界";
+        public string PreviewButtonText { get => _previewButtonText; set { _previewButtonText = value; OnPropertyChanged(); } }
+
+        private bool _isPreviewing = false;
+        public bool IsPreviewing
+        {
+            get => _isPreviewing;
+            set
+            {
+                _isPreviewing = value;
+                OnPropertyChanged();
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        public ICommand PreviewBoundaryCommand { get; }
+
+        private CancellationTokenSource? _previewCts;
+
         public ScanAreaViewModel(ProjectData projectData)
         {
             _projectData = projectData;
+            PreviewBoundaryCommand = new RelayCommand(async _ => await ExecutePreviewBoundary());
             ReloadImage();
+        }
+
+        private async Task ExecutePreviewBoundary()
+        {
+            if (IsPreviewing)
+            {
+                // 如果正在预览中，触发取消
+                _previewCts?.Cancel();
+                PreviewStatusText = "正在取消预览...";
+                PreviewButtonText = "正在取消...";
+                return;
+            }
+
+            if (HardwareService.Instance.ActiveRobot == null || !HardwareService.Instance.ActiveRobot.IsConnected)
+            {
+                MessageBox.Show("请先连接机械臂！", "提示");
+                return;
+            }
+
+            IsPreviewing = true;
+            PreviewButtonText = "取消预览";
+            PreviewStatusText = "正在进行边界预览...";
+            _previewCts = new CancellationTokenSource();
+
+            try
+            {
+                float minX = Math.Min(Settings.StartX, Settings.StopX);
+                float maxX = Math.Max(Settings.StartX, Settings.StopX);
+                float minY = Math.Min(Settings.StartY, Settings.StopY);
+                float maxY = Math.Max(Settings.StartY, Settings.StopY);
+                float z = Settings.ScanHeightZ;
+                float r = Settings.ScanAngleR;
+
+                var robot = HardwareService.Instance.ActiveRobot;
+
+                var points = new[]
+                {
+                    (minX, minY),
+                    (maxX, minY),
+                    (maxX, maxY),
+                    (minX, maxY),
+                    (minX, minY)
+                };
+
+                foreach (var point in points)
+                {
+                    if (_previewCts.Token.IsCancellationRequested)
+                    {
+                        PreviewStatusText = "边界预览已取消。";
+                        return;
+                    }
+                    await robot.MoveToAsync(point.Item1, point.Item2, z, r);
+                }
+
+                PreviewStatusText = "边界预览结束。";
+            }
+            catch (Exception ex)
+            {
+                PreviewStatusText = "预览发生异常结束。";
+                MessageBox.Show("预览过程中发生错误: " + ex.Message, "错误");
+            }
+            finally
+            {
+                PreviewButtonText = "预览扫描边界";
+                IsPreviewing = false;
+                _previewCts?.Dispose();
+                _previewCts = null;
+            }
         }
 
         public void ReloadImage()
