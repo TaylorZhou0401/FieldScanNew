@@ -19,8 +19,8 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Text="收敛误差 (dBuV/m):" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox x:Name="TxtError" Grid.Column="1" Text="0.2" VerticalAlignment="Center" Padding="5"/>
+            <TextBlock Text="收敛误差 (dB):     " VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox x:Name="TxtError" Grid.Column="1" Text="-15" VerticalAlignment="Center" Padding="5"/>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,0,0,15">
@@ -29,7 +29,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="连续稳定次数 (K):  " VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox x:Name="TxtK" Grid.Column="1" Text="3" VerticalAlignment="Center" Padding="5"/>
+            <TextBox x:Name="TxtK" Grid.Column="1" Text="2" VerticalAlignment="Center" Padding="5"/>
         </Grid>
 
         <Grid Grid.Row="3" Margin="0,0,0,15">
@@ -48,7 +48,7 @@
                     <Setter Property="Text" Value="说明: 请点击上方输入框以查看对应的参数说明。" />
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding ElementName=TxtError, Path=IsKeyboardFocusWithin}" Value="True">
-                            <Setter Property="Text" Value="说明: 设定的目标收敛误差阈值。当预测误差低于此值且保持稳定时，扫描将提前结束。(建议范围: 0.05 ~ 0.5)" />
+                            <Setter Property="Text" Value="说明: 设定的目标收敛相较全场的相对误差阈值(dB)。当预测误差低于此值且保持稳定时，扫描将提前结束。(建议范围: -50 ~ -10)" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding ElementName=TxtK, Path=IsKeyboardFocusWithin}" Value="True">
                             <Setter Property="Text" Value="说明: 误差需要连续低于阈值的次数。数值越大结果越可靠，但扫描耗时会相应增加。(建议范围: 5 ~ 20)" />

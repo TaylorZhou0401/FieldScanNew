@@ -43,6 +43,7 @@ namespace FieldScanNew.ViewModels
             public string Message { get; set; } = "";
             public List<(float X, float Y)> NextPoints { get; set; } = new List<(float X, float Y)>();
             public int ClusterCount { get; set; }
+            public double ExpectedError { get; set; }
         }
 
         public class SampledPoint
@@ -69,8 +70,8 @@ namespace FieldScanNew.ViewModels
             if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量！", "提示"); return; }
 
             // 新增: 弹出参数设置窗口获取用户输入
-            double inputError = 0.2;
-            int inputK = 3;
+            double inputError = -15.0;
+            int inputK = 2;
             double inputInitRatio = 0.1;
             var paramsDialog = new QbcParamsDialog(inputError, inputK, inputInitRatio);
             if (paramsDialog.ShowDialog() != true) return; // 用户取消
@@ -245,8 +246,8 @@ namespace FieldScanNew.ViewModels
 
                     // --- [Step 1] 参数设定：自适应停止机制 ---
                     
-                    // Error: 采样变化误差允许值（阈值），单位 dBuV/m
-                    // 判定标准：当 S_n (RMSE) <= Error 时，认为模型趋于稳定
+                    // Error: 采样变化相对误差允许值（阈值），单位 dB
+                    // 判定标准：当 Sn_dB <= Error 时，认为模型趋于稳定
                     double Error = inputError; // 使用用户输入的 Error
 
                     // K: 需要连续满足误差标准的次数
@@ -257,13 +258,9 @@ namespace FieldScanNew.ViewModels
                     // 初始为 0，满足条件 +=1，不满足重置为 0
                     int count = 0;
 
-                    // P_prev: 上一次的全场 RBF 插值预测结果 (P_{n-1})
-                    // 用于与当前结果 P_n 计算误差 S_n
-                    double[]? P_prev = null;
-
                     // maxN: 全局最大点数限制
                     int maxN = scanSettings.NumX * scanSettings.NumY;
-                    int configuredUpperLimit = Math.Max(1, (int)Math.Ceiling(maxN * 0.6));
+                    int configuredUpperLimit = Math.Max(1, (int)Math.Ceiling(maxN * 0.45));
                     bool reachedConfiguredUpperLimit = false;
                     int batchIndex = 0;
 
@@ -274,7 +271,7 @@ namespace FieldScanNew.ViewModels
                     {
                         if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopQBC;
 
-                            // Early stop safeguard: stop when reaching configured upper limit (60%)
+                            // Early stop safeguard: stop when reaching configured upper limit (45%)
                             if (sampledPoints.Count >= configuredUpperLimit)
                         {
                                 reachedConfiguredUpperLimit = true;
@@ -345,35 +342,26 @@ namespace FieldScanNew.ViewModels
                             }
                         }
 
-                        // --- 误差 S_n 计算 (RMSE) ---
-                        // 若 P_prev 不为空 (即至少是第二次迭代)，则可以计算误差 S_n
-                        if (P_prev != null)
+                        // --- [Step 3] 误差估算与逻辑判定 (基于待采样点平均标准差) ---
+                        // expectedError 为本轮推测选出的 K 个候选点的平均标准差 * 9.6
+                        double expectedError = nextPointData.ExpectedError;
+                        
+                        // 将预估真实误差与全场最大场强作换算，求 dB 单位的相对误差
+                        double maxField = Math.Max(P_n.Max(), 1e-6); // 防止除零
+                        double Sn_ratio = expectedError / maxField;
+                        double Sn_dB = 20 * Math.Log10(Math.Max(Sn_ratio, 1e-12));
+
+                        // 如果 Sn_dB <= Error: 说明此轮选出的点代表的不确定度已经很低 -> 可能趋于稳定
+                        // 如果 Sn_dB > Error: 说明当前模型仍存在较大不确定区域 -> 尚不稳定
+                        if (Sn_dB <= Error)
                         {
-                            // S_n = sqrt( sum((P_n - P_prev)^2) / totalPoints )
-                            double sumSqDiff = 0;
-                            for (int k = 0; k < totalPoints; k++)
-                            {
-                                double diff = P_n[k] - P_prev[k];
-                                sumSqDiff += diff * diff;
-                            }
-                            double Sn = Math.Sqrt(sumSqDiff / totalPoints);
-
-                            // --- [Step 3] 逻辑分支判定 (稳定性检查) ---
-                            // 如果 S_n <= Error: 这一次新增采样对模型影响很小 -> 可能趋于稳定
-                            // 如果 S_n > Error: 这一次新增采样显著改变了模型 -> 尚不稳定
-                            if (Sn <= Error)
-                            {
-                                count++;
-                                // 可以在此增加 Debug 输出或 UI 状态更新: "稳定计数: {count}/{K}, 误差: {Sn:F3}"
-                            }
-                            else
-                            {
-                                count = 0; // 误差较大，前面积累的稳定次数作废，重置计数
-                            }
+                            count++;
+                            // 可以在此增加 Debug 输出或 UI 状态更新: "稳定计数: {count}/{K}, 估算误差: {Sn_dB:F2} dB"
                         }
-
-                        // 更新 P_prev (即 P_(n-1)) 为当前的 P_n，供下一次迭代使用
-                        P_prev = P_n;
+                        else
+                        {
+                            count = 0; // 误差较大，前面积累的稳定次数作废，重置计数
+                        }
 
                         // 更新热力图 (使用插值后的完整数据，视觉效果更好，实时看到预测结果)
                         heatMapSeries.Data = filledData;
@@ -394,7 +382,7 @@ namespace FieldScanNew.ViewModels
                     // --- [Step 4] 循环结束后的收敛状态报告 ---
                     bool reachedUpperLimit = reachedConfiguredUpperLimit || sampledPoints.Count >= maxN;
                     string stopReason = (count >= K)
-                        ? $"模型已收敛 (连续 {K} 次误差 < {Error} dBuV/m)"
+                        ? $"模型已收敛 (连续 {K} 次误差 < {Error} dB)"
                         : reachedUpperLimit
                             ? "扫描已达到设定上限"
                             : "未找到可继续采样点，扫描结束";
@@ -686,6 +674,9 @@ namespace FieldScanNew.ViewModels
                 var currentXObs = xObs.ToList();
                 var currentYObs = yObs.ToList();
 
+                double sumSigma = 0;
+                int sigmaCount = 0;
+
                 foreach (int idx in initialBatch)
                 {
                     var cPt = candidatePool[idx];
@@ -700,15 +691,24 @@ namespace FieldScanNew.ViewModels
                     finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
                     currentXObs.Add(cPt.Pt);
                     currentYObs.Add(cPt.Mean);
+                    
+                    sumSigma += Math.Sqrt(Math.Max(0, cPt.Var));
+                    sigmaCount++;
                 }
 
                 if (finalPoints.Count == 0 && initialBatch.Count > 0)
                 {
                      var cPt = candidatePool[initialBatch[0]];
                      finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
+                     
+                     sumSigma += Math.Sqrt(Math.Max(0, cPt.Var));
+                     sigmaCount++;
                 }
 
-                return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K };
+                double averageSigma = sigmaCount > 0 ? sumSigma / sigmaCount : 0;
+                double expectedError = averageSigma * 9.6;
+
+                return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K, ExpectedError = expectedError };
             }
             catch (Exception ex) { return new QbcOutputData { Status = "error", Message = $"Internal Error: {ex.Message}" }; }
         }
