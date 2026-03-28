@@ -43,7 +43,6 @@ namespace FieldScanNew.ViewModels
             public string Message { get; set; } = "";
             public List<(float X, float Y)> NextPoints { get; set; } = new List<(float X, float Y)>();
             public int ClusterCount { get; set; }
-            public double ExpectedError { get; set; }
         }
 
         public class SampledPoint
@@ -292,6 +291,8 @@ namespace FieldScanNew.ViewModels
                         var optimizedPath = OptimizeScanPath(nextPointData.NextPoints, currentPointPos);
 
                         double[]? latestTraceData = null;
+                        
+                        List<Task<double>> maxStdDevTasks = new List<Task<double>>();
 
                         foreach (var targetPt in optimizedPath)
                         {
@@ -321,6 +322,11 @@ namespace FieldScanNew.ViewModels
                             sampledPoints.Add(new SampledPoint { X = nextX, Y = nextY, Magnitude = newMaxVal, BatchId = batchIndex });
 
                             RecordFullTraceData(ref isFullHeaderWritten, sbFull, nextX, nextY, newTraceData, startFreq, stopFreq);
+                            
+                            // 启动后台任务: 计算加入此点后的全场预测最大标准差
+                            var ptsSnapshot = sampledPoints.ToList();
+                            var stdDevTask = Task.Run(() => CalculateMaxStandardDeviation(ptsSnapshot, scanSettings, xMin, xMax, yMin, yMax));
+                            maxStdDevTasks.Add(stdDevTask);
                         }
 
                         // --- [Step 2] 全场插值 (P_n) 计算 ---
@@ -342,14 +348,22 @@ namespace FieldScanNew.ViewModels
                             }
                         }
 
-                        // --- [Step 3] 误差估算与逻辑判定 (基于待采样点平均标准差) ---
-                        // expectedError 为本轮推测选出的 K 个候选点的平均标准差 * 9.6
-                        double expectedError = nextPointData.ExpectedError;
+                // --- [Step 3] 误差估算与逻辑判定 (从线性域转回dB的严格相对误差) ---
+                        // 等待本批次所有后台标准差计算完成 (后台计算已基于线性场强，得到的为 sigma_lin)
+                        double[] batchMaxStds = await Task.WhenAll(maxStdDevTasks);
+                        double minMaxSigma_lin = batchMaxStds.Length > 0 ? batchMaxStds.Min() : 1e-12;
                         
-                        // 将预估真实误差与全场最大场强作换算，求 dB 单位的相对误差
-                        double maxField = Math.Max(P_n.Max(), 1e-6); // 防止除零
-                        double Sn_ratio = expectedError / maxField;
-                        double Sn_dB = 20 * Math.Log10(Math.Max(Sn_ratio, 1e-12));
+                        // 1. 估算线性误差极差: Er_lin = 9.6 * sigma_lin
+                        double expectedError_lin = minMaxSigma_lin * 9.6;
+                        
+                        // 2. 将绝对误差由线性域换算回绝对 dB 域: Er_AdB = 20*lg(Er_lin)
+                        double Er_AdB = 20 * Math.Log10(Math.Max(expectedError_lin, 1e-12));
+
+                        // P_n 存的是 dB 值，获取全场预测的最大场强 x_max (dB)
+                        double maxField_dB = Math.Max(P_n.Max(), -100.0);
+
+                        // 3. 计算相对于全场最大场的归一化误差 Er_dB = Er_AdB - x_max
+                        double Sn_dB = Er_AdB - maxField_dB;
 
                         // 如果 Sn_dB <= Error: 说明此轮选出的点代表的不确定度已经很低 -> 可能趋于稳定
                         // 如果 Sn_dB > Error: 说明当前模型仍存在较大不确定区域 -> 尚不稳定
@@ -543,7 +557,8 @@ namespace FieldScanNew.ViewModels
                 int M = Math.Max(1, (int)(totalPoints * 0.10));
 
                 double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
-                double[] yObs = sampledPoints.Select(p => p.Magnitude).ToArray();
+                // 退化成线性：将 Magnitude 从 dB 还原为线性物理量用于 RBF 拟合并计算方差
+                double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
 
                 var xCoor = GenerateLinspace(hyperParams.X_min, hyperParams.X_max, hyperParams.Nx);
                 var yCoor = GenerateLinspace(hyperParams.Y_min, hyperParams.Y_max, hyperParams.Ny);
@@ -674,8 +689,12 @@ namespace FieldScanNew.ViewModels
                 var currentXObs = xObs.ToList();
                 var currentYObs = yObs.ToList();
 
-                double sumSigma = 0;
-                int sigmaCount = 0;
+                // 引入归一化欧氏距离防聚集策略
+                // 由于 xStep 和 yStep 可能相差较大（长方形网格或异构扫描参数）
+                // 我们在计算距离时，将实际物理坐标映射到 [0, Nx-1] 和 [0, Ny-1] 的“网格索引空间”中。
+                // 这样，无论 X/Y 物理距离拉伸比例如何，我们都能确保各方向的聚集考量是均等的。
+                // 只要两点在网格中的索引距离小于阈值（例如 1.5 个网格对角线），就认为它们发生了信息聚集。
+                double gridMinAllowedDist = 1.6; // 阈值设定为 1.6 个网格单位，覆盖八邻域防聚集
 
                 foreach (int idx in initialBatch)
                 {
@@ -683,34 +702,100 @@ namespace FieldScanNew.ViewModels
 
                     if (finalPoints.Count > 0)
                     {
-                        var singleCheck = new List<double[]>{ cPt.Pt };
-                        var (v, m) = getVariances(currentXObs.ToArray(), currentYObs.ToArray(), singleCheck);
-                        if (v[0] < minVarThreshold) continue;
+                         bool isTooClose = false;
+                         // 将该候选点的物理坐标转换到虚拟网格坐标 (Grid Index)
+                         double cGridX = xStep > 0 ? (cPt.Pt[0] - hyperParams.X_min) / xStep : 0;
+                         double cGridY = yStep > 0 ? (cPt.Pt[1] - hyperParams.Y_min) / yStep : 0;
+
+                         foreach (var fp in finalPoints)
+                         {
+                              // 同理，将 finalPoints 中已采用的物理坐标转换为虚拟网格坐标
+                              double fpGridX = xStep > 0 ? (fp.X - hyperParams.X_min) / xStep : 0;
+                              double fpGridY = yStep > 0 ? (fp.Y - hyperParams.Y_min) / yStep : 0;
+                              
+                              // 在无量纲的网格空间求欧式距离（网格索引距离）
+                              double gridDist = Math.Sqrt(Math.Pow(fpGridX - cGridX, 2) + Math.Pow(fpGridY - cGridY, 2));
+
+                              // 如果距离小于设定的防聚集阈值（即它们挤在了很近的网格圈内）
+                              if (gridDist < gridMinAllowedDist)
+                              {
+                                  isTooClose = true;
+                                  break;
+                              }
+                         }
+
+                         // 若太近，发生过聚集，则放弃这个点，直接判断下一个批候选点
+                         if (isTooClose) continue;
                     }
 
+                    // 空间聚集验证通过，加入确定的采样批次中
                     finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
                     currentXObs.Add(cPt.Pt);
                     currentYObs.Add(cPt.Mean);
-                    
-                    sumSigma += Math.Sqrt(Math.Max(0, cPt.Var));
-                    sigmaCount++;
                 }
 
                 if (finalPoints.Count == 0 && initialBatch.Count > 0)
                 {
                      var cPt = candidatePool[initialBatch[0]];
                      finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
-                     
-                     sumSigma += Math.Sqrt(Math.Max(0, cPt.Var));
-                     sigmaCount++;
                 }
 
-                double averageSigma = sigmaCount > 0 ? sumSigma / sigmaCount : 0;
-                double expectedError = averageSigma * 9.6;
-
-                return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K, ExpectedError = expectedError };
+                return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K };
             }
             catch (Exception ex) { return new QbcOutputData { Status = "error", Message = $"Internal Error: {ex.Message}" }; }
+        }
+
+        private static double CalculateMaxStandardDeviation(List<SampledPoint> sampledPoints, ScanSettings settings, double xMin, double xMax, double yMin, double yMax)
+        {
+            if (sampledPoints.Count < 4) return 0;
+
+            double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
+            // 在计算标准差前，退化成线性：这样计算出的 maxVar 也是基于线性域平方的
+            double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
+
+            var xCoor = GenerateLinspace(xMin, xMax, settings.NumX);
+            var yCoor = GenerateLinspace(yMin, yMax, settings.NumY);
+
+            var sampledIndices = new HashSet<(int, int)>();
+            double xStep = (settings.NumX > 1) ? (xMax - xMin) / (settings.NumX - 1) : 0;
+            double yStep = (settings.NumY > 1) ? (yMax - yMin) / (settings.NumY - 1) : 0;
+
+            foreach (var p in sampledPoints)
+            {
+                int i = (settings.NumX > 1) ? (int)Math.Round(((double)p.X - xMin) / xStep) : 0;
+                int j = (settings.NumY > 1) ? (int)Math.Round(((double)p.Y - yMin) / yStep) : 0;
+                i = Math.Max(0, Math.Min(i, settings.NumX - 1));
+                j = Math.Max(0, Math.Min(j, settings.NumY - 1));
+                sampledIndices.Add((i, j));
+            }
+
+            var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
+            var models = new List<RbfInterpolator>();
+            foreach (var kern in kernels)
+            {
+                models.Add(new RbfInterpolator(xObs, yObs, kern, 5));
+            }
+
+            double maxVar = 0.0;
+
+            for (int j = 0; j < settings.NumY; j++)
+            {
+                for (int i = 0; i < settings.NumX; i++)
+                {
+                    if (!sampledIndices.Contains((i, j)))
+                    {
+                        double[] pt = new[] { xCoor[i], yCoor[j] };
+                        double[] preds = new double[kernels.Count];
+                        for (int k = 0; k < kernels.Count; k++) preds[k] = models[k].Predict(pt);
+
+                        double mean = preds.Average();
+                        double var = preds.Sum(p => (p - mean) * (p - mean)) / preds.Length;
+                        if (var > maxVar) maxVar = var;
+                    }
+                }
+            }
+
+            return Math.Sqrt(maxVar);
         }
 
         private static List<(float X, float Y)> OptimizeScanPath(List<(float X, float Y)> points, (float X, float Y) startPos)
@@ -806,7 +891,8 @@ namespace FieldScanNew.ViewModels
             var sampledPointMap = new Dictionary<(float X, float Y), double>();
             foreach (var p in sampledPoints) sampledPointMap[((float)Math.Round(p.X, 3), (float)Math.Round(p.Y, 3))] = p.Magnitude;
             double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
-            double[] yObs = sampledPoints.Select(p => p.Magnitude).ToArray();
+            // 预测全场热力图时，同样按线性域拟合，保证最后呈现的热力图与逻辑一致
+            double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
             var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
             var rbfModels = new List<RbfInterpolator>();
             foreach (var kernel in kernels) rbfModels.Add(new RbfInterpolator(xObs, yObs, kernel, 5));
@@ -824,7 +910,10 @@ namespace FieldScanNew.ViewModels
                     {
                         double[] predictions = new double[rbfModels.Count];
                         for (int k = 0; k < rbfModels.Count; k++) predictions[k] = rbfModels[k].Predict(new[] { (double)targetX, targetY });
-                        double meanVal = predictions.Average(); filledData[i, j] = meanVal; fullPointMap[key] = meanVal;
+                        double meanVal_lin = predictions.Average();
+                        // 线性预测值转换回 dB 用于热力图显示
+                        double meanVal_dB = 20 * Math.Log10(Math.Max(meanVal_lin, 1e-12));
+                        filledData[i, j] = meanVal_dB; fullPointMap[key] = meanVal_dB;
                     }
                 }
             }
