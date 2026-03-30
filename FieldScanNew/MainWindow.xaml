@@ -164,6 +164,10 @@
                             <Button Content="▶ 开始扫描" Command="{Binding StartScanCommand}" IsEnabled="{Binding !IsScanning}"/>
                             <Button Content="▶ AI扫描" Command="{Binding QBCStartScanCommand}" IsEnabled="{Binding !IsScanning}"/>
                             <Button Content="■ 停止扫描" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}"/>
+                            <Button Content="▶ 单点QBC" Command="{Binding QBCSinglePointScanCommand}" IsEnabled="{Binding !IsScanning}"/>
+                            <Button Content="▶ BatchQBC" Command="{Binding QBCBatchFixedScanCommand}" IsEnabled="{Binding !IsScanning}"/>
+                            <Button Content="▶ 随机采样" Command="{Binding RandomSampleScanCommand}" IsEnabled="{Binding !IsScanning}"/>
+                            <Button Content="▶ 贪婪采样" Command="{Binding GreedySampleScanCommand}" IsEnabled="{Binding !IsScanning}"/>
                         </ToolBar>
 
                         <Grid>
