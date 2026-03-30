@@ -91,6 +91,10 @@ namespace FieldScanNew.ViewModels
         public ICommand LoadProjectCommand { get; }
         public ICommand StartScanCommand { get; }
         public ICommand QBCStartScanCommand { get; }
+        public ICommand QBCSinglePointScanCommand { get; }
+        public ICommand QBCBatchFixedScanCommand { get; }
+        public ICommand RandomSampleScanCommand { get; }
+        public ICommand GreedySampleScanCommand { get; }
         public ICommand StopScanCommand { get; }
 
         public MainViewModel()
@@ -119,6 +123,10 @@ namespace FieldScanNew.ViewModels
             LoadProjectCommand = new RelayCommand(ExecuteLoadProject);
             StartScanCommand = new RelayCommand(async _ => await ExecuteStartScan(), _ => !IsScanning);
             QBCStartScanCommand = new RelayCommand(async _ => await QBCExecuteStartScan(), _ => !IsScanning);
+            QBCSinglePointScanCommand = new RelayCommand(async _ => await QBCExecuteSinglePointScan(), _ => !IsScanning);
+            QBCBatchFixedScanCommand = new RelayCommand(async _ => await QBCExecuteBatchFixedScan(), _ => !IsScanning);
+            RandomSampleScanCommand = new RelayCommand(async _ => await ExecuteSparseSampleScan(false), _ => !IsScanning);
+            GreedySampleScanCommand = new RelayCommand(async _ => await ExecuteSparseSampleScan(true), _ => !IsScanning);
             StopScanCommand = new RelayCommand(_ => ExecuteStopScan(), _ => IsScanning);
 
             CurrentScanSettings.PropertyChanged += OnSettingsChanged;
@@ -378,6 +386,271 @@ namespace FieldScanNew.ViewModels
                 { try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); await _hardwareService.ActiveRobot.MoveToAsync(pos.X, pos.Y, pos.Z, 90f); } catch { } }
                 IsScanning = false;
             }
+        }
+
+        private async Task ExecuteSparseSampleScan(bool useGreedySampling)
+        {
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
+               _hardwareService.ActiveDevice == null || !_hardwareService.ActiveDevice.IsConnected)
+            { MessageBox.Show("请先连接机械臂和测量仪器！", "提示"); return; }
+
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
+            if (selectedProject == null) { MessageBox.Show("请先选择一个项目！", "提示"); return; }
+
+            var scanSettings = selectedProject.ProjectData.ScanConfig;
+            if (scanSettings.NumX < 2 || scanSettings.NumY < 2) { MessageBox.Show("扫描点数必须大于等于2！", "错误"); return; }
+            if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量(Hx 或 Hy)！", "提示"); return; }
+
+            int totalPoints = scanSettings.NumX * scanSettings.NumY;
+            int defaultCount = Math.Max(4, (int)Math.Round(totalPoints * 0.25));
+            defaultCount = Math.Min(defaultCount, totalPoints);
+            string modeName = useGreedySampling ? "贪婪" : "随机";
+
+            var countDialog = new InputDialog($"请输入{modeName}采样点数（1-{totalPoints}）:", defaultCount.ToString());
+            if (countDialog.ShowDialog() != true) return;
+            if (!int.TryParse(countDialog.Answer, out int sampleCount))
+            {
+                MessageBox.Show("请输入有效整数点数。", "提示");
+                return;
+            }
+            sampleCount = Math.Max(1, Math.Min(sampleCount, totalPoints));
+
+            UpdatePlotBackground();
+            try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
+            catch (Exception ex) { MessageBox.Show($"更新配置失败: {ex.Message}", "警告"); }
+
+            IsScanning = true;
+            _cancellationTokenSource = new CancellationTokenSource();
+            var stopwatch = Stopwatch.StartNew();
+            int settleDelayMs = 100;
+
+            var tasks = new List<(string Name, float Angle)>();
+            if (scanSettings.ScanHx) tasks.Add(("Hx", 0f));
+            if (scanSettings.ScanHy) tasks.Add(("Hy", 90f));
+
+            string projectName = SanitizeFileName(selectedProject.ProjectData.ProjectName);
+            string measurementName = SanitizeFileName(GetCurrentMeasurementName(selectedProject));
+            string modeTag = useGreedySampling ? "Greedy" : "Random";
+
+            try
+            {
+                double centerFreq = CurrentInstrumentSettings.CenterFrequencyHz;
+                double span = CurrentInstrumentSettings.SpanHz;
+                double startFreq = centerFreq - (span / 2.0);
+                double stopFreq = centerFreq + (span / 2.0);
+
+                foreach (var task in tasks)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+
+                    string componentName = task.Name;
+                    float robotAngle = task.Angle;
+
+                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                    await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, robotAngle);
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                    await Task.Delay(settleDelayMs);
+
+                    double xMin = Math.Min(scanSettings.StartX, scanSettings.StopX);
+                    double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
+                    double yMin = Math.Min(scanSettings.StartY, scanSettings.StopY);
+                    double yMax = Math.Max(scanSettings.StartY, scanSettings.StopY);
+
+                    var heatMapData = new double[scanSettings.NumX, scanSettings.NumY];
+                    var heatMapSeries = new HeatMapSeries { X0 = xMin, X1 = xMax, Y0 = yMin, Y1 = yMax, Interpolate = true, RenderMethod = HeatMapRenderMethod.Bitmap, Data = heatMapData, CoordinateDefinition = HeatMapCoordinateDefinition.Edge };
+                    HeatmapModel.Series.Clear(); HeatmapModel.Series.Add(heatMapSeries);
+                    HeatmapModel.Title = $"{modeName}采样热力图 - {componentName}";
+                    HeatmapModel.ResetAllAxes(); HeatmapModel.InvalidatePlot(true);
+
+                    var spectrumSeries = new LineSeries { Title = "Live Trace", Color = OxyColors.Blue, StrokeThickness = 1 };
+                    SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
+
+                    var allGridPoints = BuildGridPoints(scanSettings);
+                    var selectedPoints = useGreedySampling
+                        ? SelectGreedySamplePoints(allGridPoints, scanSettings.NumX, scanSettings.NumY, sampleCount)
+                        : SelectRandomSamplePoints(allGridPoints, sampleCount);
+
+                    // 与全扫描方向一致：按行优先 (Y 从小到大，同 Y 下 X 从小到大)
+                    selectedPoints = selectedPoints
+                        .OrderBy(p => Math.Round(p.Y, 3))
+                        .ThenBy(p => Math.Round(p.X, 3))
+                        .ToList();
+
+                    var sampledPoints = new List<SampledPoint>();
+                    var sbFull = new StringBuilder();
+                    bool isFullHeaderWritten = false;
+
+                    foreach (var pt in selectedPoints)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSparseScan;
+
+                        await _hardwareService.ActiveRobot.MoveToAsync(pt.X, pt.Y, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSparseScan;
+                        await Task.Delay(settleDelayMs);
+                        double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                        if (traceData.Length == 0) continue;
+
+                        for (int k = 0; k < traceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, traceData.Length);
+                            double factor = GetInterpolatedFactor(freq);
+                            traceData[k] = traceData[k] + 107.0 + factor;
+                        }
+
+                        double maxVal = traceData.Max();
+                        sampledPoints.Add(new SampledPoint { X = pt.X, Y = pt.Y, Magnitude = maxVal, BatchId = 0 });
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, pt.X, pt.Y, traceData, startFreq, stopFreq);
+
+                        double ratioX = (pt.X - xMin) / (xMax - xMin);
+                        double ratioY = (pt.Y - yMin) / (yMax - yMin);
+                        int arrayX = Math.Max(0, Math.Min((int)Math.Round(ratioX * (scanSettings.NumX - 1)), scanSettings.NumX - 1));
+                        int arrayY = Math.Max(0, Math.Min((int)Math.Round(ratioY * (scanSettings.NumY - 1)), scanSettings.NumY - 1));
+                        heatMapData[arrayX, arrayY] = maxVal;
+                        HeatmapModel.InvalidatePlot(true);
+
+                        spectrumSeries.Points.Clear();
+                        for (int k = 0; k < traceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, traceData.Length);
+                            spectrumSeries.Points.Add(new DataPoint(freq, traceData[k]));
+                        }
+                        SpectrumModel.InvalidatePlot(true);
+                    }
+
+                    if (sampledPoints.Count == 0)
+                    {
+                        MessageBox.Show($"{modeName}采样未获取到有效数据。", "提示");
+                        continue;
+                    }
+
+                    // 扫描后使用线性域插值预测全场
+                    var (filledData, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
+                    heatMapSeries.Data = filledData;
+                    HeatmapModel.InvalidatePlot(true);
+
+                    var sbPeakPred = new StringBuilder();
+                    sbPeakPred.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    var sbPeakSampled = new StringBuilder();
+                    sbPeakSampled.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    foreach (var sp in sampledPoints)
+                    {
+                        sbPeakSampled.AppendLine($"{sp.X:F3},{sp.Y:F3},{sp.Magnitude:F3}");
+                    }
+
+                    var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
+                    var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
+                    for (int j = 0; j < scanSettings.NumY; j++)
+                    {
+                        float targetY = (float)Math.Round((float)yCoor[j], 3);
+                        for (int i = 0; i < scanSettings.NumX; i++)
+                        {
+                            float targetX = (float)Math.Round((float)xCoor[i], 3);
+                            var key = (targetX, targetY);
+                            double val = fullPointMap.ContainsKey(key) ? fullPointMap[key] : 0;
+                            sbPeakPred.AppendLine($"{targetX:F3},{targetY:F3},{val:F3}");
+                        }
+                    }
+
+                    string baseName = $"{projectName}_{measurementName}_{componentName}_{modeTag}";
+                    string subFolder = $"{measurementName}_{componentName}";
+                    SaveScanDataToCsv(selectedProject, sbPeakSampled.ToString(), $"{baseName}_PeakSampled.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbPeakPred.ToString(), $"{baseName}_PeakPred.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_FullTrace.csv", subFolder);
+                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_HeatmapOverlay.png", subFolder);
+
+                    // 与 AI 扫描一致：保存实际采样点分布图
+                    double globalMin = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Min() : 0;
+                    double globalMax = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Max() : 100;
+                    if (Math.Abs(globalMax - globalMin) < 0.001) { globalMin -= 1; globalMax += 1; }
+                    SaveSamplingDistributionImage(selectedProject, sampledPoints, xMin, xMax, yMin, yMax, $"{baseName}_SamplingPoints.png", subFolder, globalMin, globalMax);
+                }
+
+            StopSparseScan:;
+                stopwatch.Stop();
+                if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    MessageBox.Show($"{modeName}采样扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "成功");
+                }
+                else
+                {
+                    MessageBox.Show($"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "提示");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
+            finally
+            {
+                if (_hardwareService.ActiveRobot != null && _hardwareService.ActiveRobot.IsConnected)
+                { try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); await _hardwareService.ActiveRobot.MoveToAsync(pos.X, pos.Y, pos.Z, 90f); } catch { } }
+                IsScanning = false;
+            }
+        }
+
+        private static List<(float X, float Y)> BuildGridPoints(ScanSettings scanSettings)
+        {
+            var allGridPoints = new List<(float X, float Y)>();
+            for (int j = 0; j < scanSettings.NumY; j++)
+            {
+                float targetY = scanSettings.StartY + j * (scanSettings.StopY - scanSettings.StartY) / Math.Max(1, scanSettings.NumY - 1);
+                for (int i = 0; i < scanSettings.NumX; i++)
+                {
+                    float targetX = scanSettings.StartX + i * (scanSettings.StopX - scanSettings.StartX) / Math.Max(1, scanSettings.NumX - 1);
+                    allGridPoints.Add((targetX, targetY));
+                }
+            }
+            return allGridPoints;
+        }
+
+        private static List<(float X, float Y)> SelectRandomSamplePoints(List<(float X, float Y)> allGridPoints, int sampleCount)
+        {
+            var rand = new Random();
+            return allGridPoints.OrderBy(_ => rand.Next()).Take(sampleCount).ToList();
+        }
+
+        private static List<(float X, float Y)> SelectGreedySamplePoints(List<(float X, float Y)> allGridPoints, int numX, int numY, int sampleCount)
+        {
+            var selectedIndices = new HashSet<int>();
+            var distancesSq = Enumerable.Repeat(double.MaxValue, allGridPoints.Count).ToArray();
+            int firstIndex = (numY / 2) * numX + (numX / 2);
+            var plannedPoints = new List<(float X, float Y)>();
+
+            for (int step = 0; step < sampleCount; step++)
+            {
+                int nextIndex = -1;
+                if (step == 0)
+                {
+                    nextIndex = Math.Max(0, Math.Min(firstIndex, allGridPoints.Count - 1));
+                }
+                else
+                {
+                    double maxMinDistSq = -1;
+                    for (int i = 0; i < allGridPoints.Count; i++)
+                    {
+                        if (!selectedIndices.Contains(i) && distancesSq[i] > maxMinDistSq)
+                        {
+                            maxMinDistSq = distancesSq[i];
+                            nextIndex = i;
+                        }
+                    }
+                }
+
+                if (nextIndex < 0) break;
+                selectedIndices.Add(nextIndex);
+                var p = allGridPoints[nextIndex];
+                plannedPoints.Add(p);
+
+                for (int i = 0; i < allGridPoints.Count; i++)
+                {
+                    if (!selectedIndices.Contains(i))
+                    {
+                        double dx = allGridPoints[i].X - p.X;
+                        double dy = allGridPoints[i].Y - p.Y;
+                        double distSq = dx * dx + dy * dy;
+                        if (distSq < distancesSq[i]) distancesSq[i] = distSq;
+                    }
+                }
+            }
+
+            return plannedPoints;
         }
 
         private void SaveScanDataToCsv(ProjectViewModel project, string csvContent, string fileName, string subFolder = "") { try { string dataFolder = Path.Combine(project.ProjectFolderPath, "Data"); if (!string.IsNullOrEmpty(subFolder)) dataFolder = Path.Combine(dataFolder, subFolder); if (!Directory.Exists(dataFolder)) Directory.CreateDirectory(dataFolder); File.WriteAllText(Path.Combine(dataFolder, fileName), csvContent, Encoding.UTF8); } catch (Exception ex) { MessageBox.Show($"保存失败: {ex.Message}"); } }

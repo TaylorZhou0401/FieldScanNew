@@ -408,6 +408,13 @@ namespace FieldScanNew.ViewModels
                     var (_, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
                     
                     sbPeak.Clear(); sbPeak.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    var sbPeakSampled = new StringBuilder();
+                    sbPeakSampled.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    foreach (var sp in sampledPoints)
+                    {
+                        sbPeakSampled.AppendLine($"{sp.X:F3},{sp.Y:F3},{sp.Magnitude:F3}");
+                    }
+
                     var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
                     var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
 
@@ -428,6 +435,7 @@ namespace FieldScanNew.ViewModels
 
                     string baseName = $"{projectName}_{measurementName}_{componentName}";
                     string subFolder = $"{measurementName}_{componentName}";
+                    SaveScanDataToCsv(selectedProject, sbPeakSampled.ToString(), $"{baseName}_AI_PeakSampled.csv", subFolder);
                     SaveScanDataToCsv(selectedProject, sbPeak.ToString(), $"{baseName}_AI_Peak.csv", subFolder);
                     SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_FullTrace.csv", subFolder);
                     // if (DutImageSource != null) SaveImage(selectedProject, DutImageSource, $"{baseName}_Capture.jpg", subFolder);
@@ -455,6 +463,460 @@ namespace FieldScanNew.ViewModels
                 {
                     string msg = $"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}\n采样点数: {totalSampledPoints} / {totalMaxPoints}";
                     MessageBox.Show(msg, "提示");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
+            finally
+            {
+                if (_hardwareService.ActiveRobot != null && _hardwareService.ActiveRobot.IsConnected)
+                { try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); await _hardwareService.ActiveRobot.MoveToAsync(pos.X, pos.Y, pos.Z, 90f); } catch { } }
+                IsScanning = false;
+            }
+        }
+
+        private async Task QBCExecuteSinglePointScan()
+        {
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
+            _hardwareService.ActiveDevice == null || !_hardwareService.ActiveDevice.IsConnected)
+            { MessageBox.Show("请先连接机械臂和测量仪器！", "提示"); return; }
+
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
+            if (selectedProject == null) { MessageBox.Show("请先选择一个项目！", "提示"); return; }
+
+            var scanSettings = selectedProject.ProjectData.ScanConfig;
+            if (scanSettings.NumX < 2 || scanSettings.NumY < 2) { MessageBox.Show("扫描点数必须大于等于2！", "错误"); return; }
+            if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量！", "提示"); return; }
+
+            int maxN = scanSettings.NumX * scanSettings.NumY;
+            int defaultLimit = Math.Max(6, (int)Math.Ceiling(maxN * 0.30));
+            defaultLimit = Math.Min(defaultLimit, maxN);
+            var countDialog = new InputDialog($"请输入单点QBC总采样点上限（1-{maxN}）:", defaultLimit.ToString());
+            if (countDialog.ShowDialog() != true) return;
+            if (!int.TryParse(countDialog.Answer, out int sampleLimit))
+            {
+                MessageBox.Show("请输入有效整数点数。", "提示");
+                return;
+            }
+            sampleLimit = Math.Max(1, Math.Min(sampleLimit, maxN));
+
+            UpdatePlotBackground();
+            try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
+            catch (Exception ex) { MessageBox.Show($"更新配置失败: {ex.Message}", "警告"); }
+
+            IsScanning = true;
+            _cancellationTokenSource = new CancellationTokenSource();
+            var stopwatch = Stopwatch.StartNew();
+            int settleDelayMs = 100;
+
+            var tasks = new List<(string Name, float Angle)>();
+            if (scanSettings.ScanHx) tasks.Add(("Hx", 0f));
+            if (scanSettings.ScanHy) tasks.Add(("Hy", 90f));
+
+            string projectName = SanitizeFileName(selectedProject.ProjectData.ProjectName);
+            string measurementName = SanitizeFileName(GetCurrentMeasurementName(selectedProject));
+
+            try
+            {
+                double centerFreq = CurrentInstrumentSettings.CenterFrequencyHz;
+                double span = CurrentInstrumentSettings.SpanHz;
+                double startFreq = centerFreq - (span / 2.0);
+                double stopFreq = centerFreq + (span / 2.0);
+
+                foreach (var task in tasks)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+
+                    string componentName = task.Name;
+                    float robotAngle = task.Angle;
+
+                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                    await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, robotAngle);
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                    await Task.Delay(settleDelayMs);
+
+                    double xMin = Math.Min(scanSettings.StartX, scanSettings.StopX);
+                    double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
+                    double yMin = Math.Min(scanSettings.StartY, scanSettings.StopY);
+                    double yMax = Math.Max(scanSettings.StartY, scanSettings.StopY);
+
+                    var heatMapData = new double[scanSettings.NumX, scanSettings.NumY];
+                    var heatMapSeries = new HeatMapSeries { X0 = xMin, X1 = xMax, Y0 = yMin, Y1 = yMax, Interpolate = true, RenderMethod = HeatMapRenderMethod.Bitmap, Data = heatMapData, CoordinateDefinition = HeatMapCoordinateDefinition.Edge };
+                    HeatmapModel.Series.Clear(); HeatmapModel.Series.Add(heatMapSeries);
+                    HeatmapModel.Title = $"单点QBC热力图 - {componentName}";
+                    HeatmapModel.ResetAllAxes(); HeatmapModel.InvalidatePlot(true);
+
+                    var spectrumSeries = new LineSeries { Title = "Live Trace", Color = OxyColors.Blue, StrokeThickness = 1 };
+                    SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
+
+                    var sbFull = new StringBuilder();
+                    bool isFullHeaderWritten = false;
+                    var sampledPoints = new List<SampledPoint>();
+
+                    int initCount = Math.Min(sampleLimit, Math.Max(4, Math.Min(6, maxN)));
+                    var allGridPoints = BuildGridPoints(scanSettings);
+                    var initPoints = SelectGreedySamplePoints(allGridPoints, scanSettings.NumX, scanSettings.NumY, initCount)
+                        .OrderBy(p => Math.Round(p.Y, 3))
+                        .ThenBy(p => Math.Round(p.X, 3))
+                        .ToList();
+
+                    foreach (var pt in initPoints)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSingleQBC;
+
+                        await _hardwareService.ActiveRobot.MoveToAsync(pt.X, pt.Y, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSingleQBC;
+                        await Task.Delay(settleDelayMs);
+                        double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                        if (traceData.Length == 0) continue;
+
+                        for (int k = 0; k < traceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, traceData.Length);
+                            double factor = GetInterpolatedFactor(freq);
+                            traceData[k] = traceData[k] + 107.0 + factor;
+                        }
+
+                        double maxVal = traceData.Max();
+                        sampledPoints.Add(new SampledPoint { X = pt.X, Y = pt.Y, Magnitude = maxVal, BatchId = 0 });
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, pt.X, pt.Y, traceData, startFreq, stopFreq);
+
+                        spectrumSeries.Points.Clear();
+                        for (int k = 0; k < traceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, traceData.Length);
+                            spectrumSeries.Points.Add(new DataPoint(freq, traceData[k]));
+                        }
+                        SpectrumModel.InvalidatePlot(true);
+                    }
+
+                    while (sampledPoints.Count < sampleLimit)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSingleQBC;
+
+                        var inputData = new QbcInputData
+                        {
+                            HyperParams = new HyperParams
+                            {
+                                X_min = xMin,
+                                X_max = xMax,
+                                Y_min = yMin,
+                                Y_max = yMax,
+                                Nx = scanSettings.NumX,
+                                Ny = scanSettings.NumY
+                            },
+                            SampledPoints = sampledPoints.ToList()
+                        };
+
+                        var next = await Task.Run(() => CalculateNextSingleSamplePoint(inputData));
+                        if (next.Status != "success" || next.NextPoints.Count == 0) break;
+
+                        var target = next.NextPoints[0];
+                        await _hardwareService.ActiveRobot.MoveToAsync(target.X, target.Y, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopSingleQBC;
+                        await Task.Delay(settleDelayMs);
+                        double[] newTraceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                        if (newTraceData.Length == 0) continue;
+
+                        for (int k = 0; k < newTraceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, newTraceData.Length);
+                            double factor = GetInterpolatedFactor(freq);
+                            newTraceData[k] = newTraceData[k] + 107.0 + factor;
+                        }
+
+                        double newMaxVal = newTraceData.Max();
+                        sampledPoints.Add(new SampledPoint { X = target.X, Y = target.Y, Magnitude = newMaxVal, BatchId = sampledPoints.Count });
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, target.X, target.Y, newTraceData, startFreq, stopFreq);
+
+                        var (filledDataLoop, _) = await Task.Run(() => FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings));
+                        heatMapSeries.Data = filledDataLoop;
+                        HeatmapModel.InvalidatePlot(true);
+
+                        spectrumSeries.Points.Clear();
+                        for (int k = 0; k < newTraceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, newTraceData.Length);
+                            spectrumSeries.Points.Add(new DataPoint(freq, newTraceData[k]));
+                        }
+                        SpectrumModel.InvalidatePlot(true);
+                    }
+
+                    if (sampledPoints.Count == 0) continue;
+
+                    var (_, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
+                    var sbPeakPred = new StringBuilder();
+                    sbPeakPred.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    var sbPeakSampled = new StringBuilder();
+                    sbPeakSampled.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    foreach (var sp in sampledPoints)
+                    {
+                        sbPeakSampled.AppendLine($"{sp.X:F3},{sp.Y:F3},{sp.Magnitude:F3}");
+                    }
+
+                    var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
+                    var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
+                    for (int j = 0; j < scanSettings.NumY; j++)
+                    {
+                        float targetY = (float)Math.Round((float)yCoor[j], 3);
+                        for (int i = 0; i < scanSettings.NumX; i++)
+                        {
+                            float targetX = (float)Math.Round((float)xCoor[i], 3);
+                            var key = (targetX, targetY);
+                            double val = fullPointMap.ContainsKey(key) ? fullPointMap[key] : 0;
+                            sbPeakPred.AppendLine($"{targetX:F3},{targetY:F3},{val:F3}");
+                        }
+                    }
+
+                    string baseName = $"{projectName}_{measurementName}_{componentName}";
+                    string subFolder = $"{measurementName}_{componentName}";
+                    SaveScanDataToCsv(selectedProject, sbPeakSampled.ToString(), $"{baseName}_AI_Single_PeakSampled.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbPeakPred.ToString(), $"{baseName}_AI_Single_Peak.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_Single_FullTrace.csv", subFolder);
+                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_AI_Single_HeatmapOverlay.png", subFolder);
+
+                    double globalMin = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Min() : 0;
+                    double globalMax = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Max() : 100;
+                    if (Math.Abs(globalMax - globalMin) < 0.001) { globalMin -= 1; globalMax += 1; }
+                    SaveSamplingDistributionImage(selectedProject, sampledPoints, xMin, xMax, yMin, yMax, $"{baseName}_AI_Single_SamplingPoints.png", subFolder, globalMin, globalMax);
+                }
+
+            StopSingleQBC:;
+                stopwatch.Stop();
+                if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    MessageBox.Show($"单点QBC扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "成功");
+                }
+                else
+                {
+                    MessageBox.Show($"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "提示");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
+            finally
+            {
+                if (_hardwareService.ActiveRobot != null && _hardwareService.ActiveRobot.IsConnected)
+                { try { var pos = await _hardwareService.ActiveRobot.GetPositionAsync(); await _hardwareService.ActiveRobot.MoveToAsync(pos.X, pos.Y, pos.Z, 90f); } catch { } }
+                IsScanning = false;
+            }
+        }
+
+        private async Task QBCExecuteBatchFixedScan()
+        {
+            if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
+            _hardwareService.ActiveDevice == null || !_hardwareService.ActiveDevice.IsConnected)
+            { MessageBox.Show("请先连接机械臂和测量仪器！", "提示"); return; }
+
+            var selectedProject = Projects.FirstOrDefault(p => p.IsSelected);
+            if (selectedProject == null) { MessageBox.Show("请先选择一个项目！", "提示"); return; }
+
+            var scanSettings = selectedProject.ProjectData.ScanConfig;
+            if (scanSettings.NumX < 2 || scanSettings.NumY < 2) { MessageBox.Show("扫描点数必须大于等于2！", "错误"); return; }
+            if (!scanSettings.ScanHx && !scanSettings.ScanHy) { MessageBox.Show("请至少勾选一个扫描分量！", "提示"); return; }
+
+            int maxN = scanSettings.NumX * scanSettings.NumY;
+            int defaultLimit = Math.Max(8, (int)Math.Ceiling(maxN * 0.40));
+            defaultLimit = Math.Min(defaultLimit, maxN);
+            var countDialog = new InputDialog($"请输入Batch-QBC总采样点上限（1-{maxN}）:", defaultLimit.ToString());
+            if (countDialog.ShowDialog() != true) return;
+            if (!int.TryParse(countDialog.Answer, out int sampleLimit))
+            {
+                MessageBox.Show("请输入有效整数点数。", "提示");
+                return;
+            }
+            sampleLimit = Math.Max(1, Math.Min(sampleLimit, maxN));
+
+            UpdatePlotBackground();
+            try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
+            catch (Exception ex) { MessageBox.Show($"更新配置失败: {ex.Message}", "警告"); }
+
+            IsScanning = true;
+            _cancellationTokenSource = new CancellationTokenSource();
+            var stopwatch = Stopwatch.StartNew();
+            int settleDelayMs = 100;
+
+            var tasks = new List<(string Name, float Angle)>();
+            if (scanSettings.ScanHx) tasks.Add(("Hx", 0f));
+            if (scanSettings.ScanHy) tasks.Add(("Hy", 90f));
+
+            string projectName = SanitizeFileName(selectedProject.ProjectData.ProjectName);
+            string measurementName = SanitizeFileName(GetCurrentMeasurementName(selectedProject));
+
+            try
+            {
+                double centerFreq = CurrentInstrumentSettings.CenterFrequencyHz;
+                double span = CurrentInstrumentSettings.SpanHz;
+                double startFreq = centerFreq - (span / 2.0);
+                double stopFreq = centerFreq + (span / 2.0);
+
+                foreach (var task in tasks)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+
+                    string componentName = task.Name;
+                    float robotAngle = task.Angle;
+
+                    var currentPos = await _hardwareService.ActiveRobot.GetPositionAsync();
+                    await _hardwareService.ActiveRobot.MoveToAsync(currentPos.X, currentPos.Y, currentPos.Z, robotAngle);
+                    if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                    await Task.Delay(settleDelayMs);
+
+                    double xMin = Math.Min(scanSettings.StartX, scanSettings.StopX);
+                    double xMax = Math.Max(scanSettings.StartX, scanSettings.StopX);
+                    double yMin = Math.Min(scanSettings.StartY, scanSettings.StopY);
+                    double yMax = Math.Max(scanSettings.StartY, scanSettings.StopY);
+
+                    var heatMapData = new double[scanSettings.NumX, scanSettings.NumY];
+                    var heatMapSeries = new HeatMapSeries { X0 = xMin, X1 = xMax, Y0 = yMin, Y1 = yMax, Interpolate = true, RenderMethod = HeatMapRenderMethod.Bitmap, Data = heatMapData, CoordinateDefinition = HeatMapCoordinateDefinition.Edge };
+                    HeatmapModel.Series.Clear(); HeatmapModel.Series.Add(heatMapSeries);
+                    HeatmapModel.Title = $"Batch-QBC热力图 - {componentName}";
+                    HeatmapModel.ResetAllAxes(); HeatmapModel.InvalidatePlot(true);
+
+                    var spectrumSeries = new LineSeries { Title = "Live Trace", Color = OxyColors.Blue, StrokeThickness = 1 };
+                    SpectrumModel.Series.Clear(); SpectrumModel.Series.Add(spectrumSeries); SpectrumModel.InvalidatePlot(true);
+
+                    var sbFull = new StringBuilder();
+                    bool isFullHeaderWritten = false;
+                    var sampledPoints = new List<SampledPoint>();
+
+                    int initCount = Math.Min(sampleLimit, Math.Max(4, Math.Min(8, maxN)));
+                    var allGridPoints = BuildGridPoints(scanSettings);
+                    var initPoints = SelectGreedySamplePoints(allGridPoints, scanSettings.NumX, scanSettings.NumY, initCount)
+                        .OrderBy(p => Math.Round(p.Y, 3))
+                        .ThenBy(p => Math.Round(p.X, 3))
+                        .ToList();
+
+                    foreach (var pt in initPoints)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopBatchQBC;
+
+                        await _hardwareService.ActiveRobot.MoveToAsync(pt.X, pt.Y, scanSettings.ScanHeightZ, robotAngle);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopBatchQBC;
+                        await Task.Delay(settleDelayMs);
+                        double[] traceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                        if (traceData.Length == 0) continue;
+
+                        for (int k = 0; k < traceData.Length; k++)
+                        {
+                            double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, traceData.Length);
+                            double factor = GetInterpolatedFactor(freq);
+                            traceData[k] = traceData[k] + 107.0 + factor;
+                        }
+
+                        double maxVal = traceData.Max();
+                        sampledPoints.Add(new SampledPoint { X = pt.X, Y = pt.Y, Magnitude = maxVal, BatchId = 0 });
+                        RecordFullTraceData(ref isFullHeaderWritten, sbFull, pt.X, pt.Y, traceData, startFreq, stopFreq);
+                    }
+
+                    int batchIndex = 0;
+                    while (sampledPoints.Count < sampleLimit)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopBatchQBC;
+
+                        batchIndex++;
+                        var inputData = new QbcInputData
+                        {
+                            HyperParams = new HyperParams
+                            {
+                                X_min = xMin,
+                                X_max = xMax,
+                                Y_min = yMin,
+                                Y_max = yMax,
+                                Nx = scanSettings.NumX,
+                                Ny = scanSettings.NumY
+                            },
+                            SampledPoints = sampledPoints.ToList()
+                        };
+
+                        var nextPointData = await Task.Run(() => CalculateNextBatchSamplePointsOriginal(inputData));
+                        if (nextPointData.Status != "success" || nextPointData.NextPoints.Count == 0) break;
+
+                        var currentPointPos = sampledPoints.Count > 0 ? (sampledPoints.Last().X, sampledPoints.Last().Y) : ((float)xMin, (float)yMin);
+                        var optimizedPath = OptimizeScanPath(nextPointData.NextPoints, currentPointPos);
+
+                        foreach (var targetPt in optimizedPath)
+                        {
+                            if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopBatchQBC;
+                            if (sampledPoints.Count >= sampleLimit) break;
+
+                            await _hardwareService.ActiveRobot.MoveToAsync(targetPt.X, targetPt.Y, scanSettings.ScanHeightZ, robotAngle);
+                            if (_cancellationTokenSource.Token.IsCancellationRequested) goto StopBatchQBC;
+                            await Task.Delay(settleDelayMs);
+                            double[] newTraceData = await _hardwareService.ActiveDevice.GetTraceDataAsync(0);
+                            if (newTraceData.Length == 0) continue;
+
+                            for (int k = 0; k < newTraceData.Length; k++)
+                            {
+                                double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, newTraceData.Length);
+                                double factor = GetInterpolatedFactor(freq);
+                                newTraceData[k] = newTraceData[k] + 107.0 + factor;
+                            }
+
+                            double newMaxVal = newTraceData.Max();
+                            sampledPoints.Add(new SampledPoint { X = targetPt.X, Y = targetPt.Y, Magnitude = newMaxVal, BatchId = batchIndex });
+                            RecordFullTraceData(ref isFullHeaderWritten, sbFull, targetPt.X, targetPt.Y, newTraceData, startFreq, stopFreq);
+
+                            var (filledDataLoop, _) = await Task.Run(() => FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings));
+                            heatMapSeries.Data = filledDataLoop;
+                            HeatmapModel.InvalidatePlot(true);
+
+                            spectrumSeries.Points.Clear();
+                            for (int k = 0; k < newTraceData.Length; k++)
+                            {
+                                double freq = GetFrequencyAtIndex(startFreq, stopFreq, k, newTraceData.Length);
+                                spectrumSeries.Points.Add(new DataPoint(freq, newTraceData[k]));
+                            }
+                            SpectrumModel.InvalidatePlot(true);
+                        }
+                    }
+
+                    if (sampledPoints.Count == 0) continue;
+
+                    var (_, fullPointMap) = FillUnsampledPointsWithRbfMean(sampledPoints, scanSettings);
+                    var sbPeakPred = new StringBuilder();
+                    sbPeakPred.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    var sbPeakSampled = new StringBuilder();
+                    sbPeakSampled.AppendLine("PhysicalX(mm),PhysicalY(mm),MaxAmplitude(dBuV/m)");
+                    foreach (var sp in sampledPoints)
+                    {
+                        sbPeakSampled.AppendLine($"{sp.X:F3},{sp.Y:F3},{sp.Magnitude:F3}");
+                    }
+
+                    var xCoor = GenerateLinspace(xMin, xMax, scanSettings.NumX);
+                    var yCoor = GenerateLinspace(yMin, yMax, scanSettings.NumY);
+                    for (int j = 0; j < scanSettings.NumY; j++)
+                    {
+                        float targetY = (float)Math.Round((float)yCoor[j], 3);
+                        for (int i = 0; i < scanSettings.NumX; i++)
+                        {
+                            float targetX = (float)Math.Round((float)xCoor[i], 3);
+                            var key = (targetX, targetY);
+                            double val = fullPointMap.ContainsKey(key) ? fullPointMap[key] : 0;
+                            sbPeakPred.AppendLine($"{targetX:F3},{targetY:F3},{val:F3}");
+                        }
+                    }
+
+                    string baseName = $"{projectName}_{measurementName}_{componentName}";
+                    string subFolder = $"{measurementName}_{componentName}";
+                    SaveScanDataToCsv(selectedProject, sbPeakSampled.ToString(), $"{baseName}_AI_Batch_PeakSampled.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbPeakPred.ToString(), $"{baseName}_AI_Batch_Peak.csv", subFolder);
+                    SaveScanDataToCsv(selectedProject, sbFull.ToString(), $"{baseName}_AI_Batch_FullTrace.csv", subFolder);
+                    SaveHeatmapImage(selectedProject, HeatmapModel, $"{baseName}_AI_Batch_HeatmapOverlay.png", subFolder);
+
+                    double globalMin = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Min() : 0;
+                    double globalMax = fullPointMap.Values.Count > 0 ? fullPointMap.Values.Max() : 100;
+                    if (Math.Abs(globalMax - globalMin) < 0.001) { globalMin -= 1; globalMax += 1; }
+                    SaveSamplingDistributionImage(selectedProject, sampledPoints, xMin, xMax, yMin, yMax, $"{baseName}_AI_Batch_SamplingPoints.png", subFolder, globalMin, globalMax);
+                }
+
+            StopBatchQBC:;
+                stopwatch.Stop();
+                if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    MessageBox.Show($"Batch-QBC扫描完成！\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "成功");
+                }
+                else
+                {
+                    MessageBox.Show($"扫描已停止。\n耗时: {stopwatch.Elapsed:hh\\:mm\\:ss}", "提示");
                 }
             }
             catch (Exception ex) { MessageBox.Show("扫描错误: " + ex.Message, "错误"); }
@@ -675,6 +1137,290 @@ namespace FieldScanNew.ViewModels
                     if (!changed) break;
                 }
 
+                var finalPoints = new List<(float X, float Y)>();
+                var currentXObs = xObs.ToList();
+                var currentYObs = yObs.ToList();
+
+                // 单层局部方差衰减策略（替换原几何距离防聚集）
+                // 目标：只评估候选点邻域内方差收益，避免全局重复计算，并沿用 V_low 判据。
+                var rankedCandidates = candidatePool.OrderByDescending(c => c.Var).ToList();
+
+                // 保守参数：邻域略大、衰减较温和、V_low 阈值略提高以提升稳健性
+                double localRadiusGrid = 2.4;
+                double decayAlpha = 0.35;
+                double avgCandidateVar = rankedCandidates.Count > 0 ? rankedCandidates.Average(c => c.Var) : 0.0;
+                double V_low = Math.Max(minVarThreshold * 1.20, avgCandidateVar * 0.70);
+
+                int candCount = rankedCandidates.Count;
+                var candGridX = new double[candCount];
+                var candGridY = new double[candCount];
+                var dynamicVars = new double[candCount];
+                var gridToCandidate = new Dictionary<(int gx, int gy), int>();
+
+                for (int i = 0; i < candCount; i++)
+                {
+                    var c = rankedCandidates[i];
+                    candGridX[i] = xStep > 0 ? (c.Pt[0] - hyperParams.X_min) / xStep : 0;
+                    candGridY[i] = yStep > 0 ? (c.Pt[1] - hyperParams.Y_min) / yStep : 0;
+                    dynamicVars[i] = c.Var;
+                    int gx = (int)Math.Round(candGridX[i]);
+                    int gy = (int)Math.Round(candGridY[i]);
+                    if (!gridToCandidate.ContainsKey((gx, gy))) gridToCandidate[(gx, gy)] = i;
+                }
+
+                int rCeil = (int)Math.Ceiling(localRadiusGrid);
+                double radiusSq = localRadiusGrid * localRadiusGrid;
+                var neighborOffsets = new List<(int dx, int dy, double weight)>();
+                for (int dy = -rCeil; dy <= rCeil; dy++)
+                {
+                    for (int dx = -rCeil; dx <= rCeil; dx++)
+                    {
+                        double dSq = dx * dx + dy * dy;
+                        if (dSq > radiusSq) continue;
+                        double d = Math.Sqrt(dSq);
+                        double w = 1.0 - d / (localRadiusGrid + 1e-12);
+                        if (w > 0) neighborOffsets.Add((dx, dy, w));
+                    }
+                }
+
+                // 单层循环：候选点仅扫描一次，不再做“点对点几何距离双层比较”
+                for (int i = 0; i < candCount && finalPoints.Count < K; i++)
+                {
+                    if (dynamicVars[i] < V_low) continue;
+
+                    int gx = (int)Math.Round(candGridX[i]);
+                    int gy = (int)Math.Round(candGridY[i]);
+
+                    double localWeightedVarSum = 0.0;
+                    double localWeightSum = 0.0;
+                    foreach (var ofst in neighborOffsets)
+                    {
+                        var key = (gx + ofst.dx, gy + ofst.dy);
+                        if (gridToCandidate.TryGetValue(key, out int nIdx))
+                        {
+                            localWeightedVarSum += dynamicVars[nIdx] * ofst.weight;
+                            localWeightSum += ofst.weight;
+                        }
+                    }
+
+                    double localMeanVar = localWeightSum > 0 ? localWeightedVarSum / localWeightSum : dynamicVars[i];
+                    if (localMeanVar < V_low) continue;
+
+                    var chosen = rankedCandidates[i];
+                    finalPoints.Add(((float)chosen.Pt[0], (float)chosen.Pt[1]));
+                    currentXObs.Add(chosen.Pt);
+                    currentYObs.Add(chosen.Mean);
+
+                    // 局部衰减：模拟新增采样点主要影响其邻域不确定度
+                    foreach (var ofst in neighborOffsets)
+                    {
+                        var key = (gx + ofst.dx, gy + ofst.dy);
+                        if (gridToCandidate.TryGetValue(key, out int nIdx))
+                        {
+                            double factor = 1.0 - decayAlpha * ofst.weight;
+                            if (factor < 0.1) factor = 0.1;
+                            dynamicVars[nIdx] = Math.Max(0.0, dynamicVars[nIdx] * factor);
+                        }
+                    }
+                }
+
+                if (finalPoints.Count == 0 && rankedCandidates.Count > 0)
+                {
+                    var cPt = rankedCandidates[0];
+                    finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
+                }
+
+                return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K };
+            }
+            catch (Exception ex) { return new QbcOutputData { Status = "error", Message = $"Internal Error: {ex.Message}" }; }
+        }
+
+        private static QbcOutputData CalculateNextSingleSamplePoint(QbcInputData inputData)
+        {
+            try
+            {
+                var hyperParams = inputData.HyperParams;
+                var sampledPoints = inputData.SampledPoints;
+                if (sampledPoints == null || sampledPoints.Count == 0) return new QbcOutputData { Status = "error", Message = "No sampled points" };
+
+                double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
+                double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
+
+                var xCoor = GenerateLinspace(hyperParams.X_min, hyperParams.X_max, hyperParams.Nx);
+                var yCoor = GenerateLinspace(hyperParams.Y_min, hyperParams.Y_max, hyperParams.Ny);
+
+                var sampledIndices = new HashSet<(int, int)>();
+                double xStep = (hyperParams.Nx > 1) ? (hyperParams.X_max - hyperParams.X_min) / (hyperParams.Nx - 1) : 0;
+                double yStep = (hyperParams.Ny > 1) ? (hyperParams.Y_max - hyperParams.Y_min) / (hyperParams.Ny - 1) : 0;
+                foreach (var p in sampledPoints)
+                {
+                    int i = (hyperParams.Nx > 1) ? (int)Math.Round(((double)p.X - hyperParams.X_min) / xStep) : 0;
+                    int j = (hyperParams.Ny > 1) ? (int)Math.Round(((double)p.Y - hyperParams.Y_min) / yStep) : 0;
+                    i = Math.Max(0, Math.Min(i, hyperParams.Nx - 1));
+                    j = Math.Max(0, Math.Min(j, hyperParams.Ny - 1));
+                    sampledIndices.Add((i, j));
+                }
+
+                var unselectedPoints = new List<double[]>();
+                for (int j = 0; j < hyperParams.Ny; j++)
+                {
+                    for (int i = 0; i < hyperParams.Nx; i++)
+                    {
+                        if (!sampledIndices.Contains((i, j)))
+                        {
+                            unselectedPoints.Add(new[] { xCoor[i], yCoor[j] });
+                        }
+                    }
+                }
+
+                if (unselectedPoints.Count == 0) return new QbcOutputData { Status = "error", Message = "No more points to sample" };
+
+                var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
+                var preds = new double[unselectedPoints.Count][];
+                for (int i = 0; i < unselectedPoints.Count; i++) preds[i] = new double[kernels.Count];
+                for (int k = 0; k < kernels.Count; k++)
+                {
+                    var model = new RbfInterpolator(xObs, yObs, kernels[k], 5);
+                    for (int i = 0; i < unselectedPoints.Count; i++) preds[i][k] = model.Predict(unselectedPoints[i]);
+                }
+
+                int bestIdx = 0;
+                double bestVar = double.MinValue;
+                for (int i = 0; i < unselectedPoints.Count; i++)
+                {
+                    double mean = preds[i].Average();
+                    double var = preds[i].Sum(p => Math.Pow(p - mean, 2)) / preds[i].Length;
+                    if (var > bestVar)
+                    {
+                        bestVar = var;
+                        bestIdx = i;
+                    }
+                }
+
+                var pt = unselectedPoints[bestIdx];
+                return new QbcOutputData
+                {
+                    Status = "success",
+                    Message = "Calculated",
+                    NextPoints = new List<(float X, float Y)> { ((float)pt[0], (float)pt[1]) },
+                    ClusterCount = 1
+                };
+            }
+            catch (Exception ex) { return new QbcOutputData { Status = "error", Message = $"Internal Error: {ex.Message}" }; }
+        }
+
+        private static QbcOutputData CalculateNextBatchSamplePointsOriginal(QbcInputData inputData)
+        {
+            try
+            {
+                var hyperParams = inputData.HyperParams;
+                var sampledPoints = inputData.SampledPoints;
+                if (sampledPoints == null || sampledPoints.Count == 0) return new QbcOutputData { Status = "error", Message = "No sampled points" };
+
+                int totalPoints = hyperParams.Nx * hyperParams.Ny;
+                int M = Math.Max(1, (int)(totalPoints * 0.10));
+
+                double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
+                double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
+
+                var xCoor = GenerateLinspace(hyperParams.X_min, hyperParams.X_max, hyperParams.Nx);
+                var yCoor = GenerateLinspace(hyperParams.Y_min, hyperParams.Y_max, hyperParams.Ny);
+
+                var sampledIndices = new HashSet<(int, int)>();
+                double xStep = (hyperParams.Nx > 1) ? (hyperParams.X_max - hyperParams.X_min) / (hyperParams.Nx - 1) : 0;
+                double yStep = (hyperParams.Ny > 1) ? (hyperParams.Y_max - hyperParams.Y_min) / (hyperParams.Ny - 1) : 0;
+
+                foreach (var p in sampledPoints)
+                {
+                    int i = (hyperParams.Nx > 1) ? (int)Math.Round(((double)p.X - hyperParams.X_min) / xStep) : 0;
+                    int j = (hyperParams.Ny > 1) ? (int)Math.Round(((double)p.Y - hyperParams.Y_min) / yStep) : 0;
+                    i = Math.Max(0, Math.Min(i, hyperParams.Nx - 1));
+                    j = Math.Max(0, Math.Min(j, hyperParams.Ny - 1));
+                    sampledIndices.Add((i, j));
+                }
+
+                var unselectedPoints = new List<double[]>();
+                for (int j = 0; j < hyperParams.Ny; j++)
+                {
+                    for (int i = 0; i < hyperParams.Nx; i++)
+                    {
+                        if (!sampledIndices.Contains((i, j))) unselectedPoints.Add(new[] { xCoor[i], yCoor[j] });
+                    }
+                }
+
+                if (unselectedPoints.Count == 0) return new QbcOutputData { Status = "error", Message = "No more points to sample" };
+
+                var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
+                var preds = new double[unselectedPoints.Count][];
+                for (int i = 0; i < unselectedPoints.Count; i++) preds[i] = new double[kernels.Count];
+                for (int k = 0; k < kernels.Count; k++)
+                {
+                    var model = new RbfInterpolator(xObs, yObs, kernels[k], 5);
+                    for (int i = 0; i < unselectedPoints.Count; i++) preds[i][k] = model.Predict(unselectedPoints[i]);
+                }
+
+                var indexedUnselected = new List<(double[] Pt, double Var, double Mean)>();
+                for (int i = 0; i < unselectedPoints.Count; i++)
+                {
+                    double mean = preds[i].Average();
+                    double var = preds[i].Sum(p => Math.Pow(p - mean, 2)) / preds[i].Length;
+                    indexedUnselected.Add((unselectedPoints[i], var, mean));
+                }
+                indexedUnselected = indexedUnselected.OrderByDescending(x => x.Var).ToList();
+
+                int actualM = Math.Min(M, indexedUnselected.Count);
+                if (actualM == 0) return new QbcOutputData { Status = "error", Message = "Candidate pool is empty" };
+
+                var candidatePool = indexedUnselected.Take(actualM).ToList();
+
+                int K = Math.Max(1, (int)(actualM * 0.25));
+                K = Math.Min(K, candidatePool.Count);
+
+                var rand = new Random(42);
+                var centroids = candidatePool.OrderBy(x => rand.Next()).Take(K).Select(c => new[] { c.Pt[0], c.Pt[1] }).ToList();
+                var clusters = new List<int>[K];
+                for (int i = 0; i < K; i++) clusters[i] = new List<int>();
+
+                int maxIters = 50;
+                for (int iter = 0; iter < maxIters; iter++)
+                {
+                    for (int i = 0; i < K; i++) clusters[i].Clear();
+                    for (int i = 0; i < candidatePool.Count; i++)
+                    {
+                        int bestClust = 0;
+                        double bestDist = double.MaxValue;
+                        for (int k = 0; k < K; k++)
+                        {
+                            double dSq = Math.Pow(candidatePool[i].Pt[0] - centroids[k][0], 2) + Math.Pow(candidatePool[i].Pt[1] - centroids[k][1], 2);
+                            if (dSq < bestDist) { bestDist = dSq; bestClust = k; }
+                        }
+                        clusters[bestClust].Add(i);
+                    }
+
+                    bool changed = false;
+                    for (int k = 0; k < K; k++)
+                    {
+                        if (clusters[k].Count == 0) continue;
+                        double sumW = 0, sumX = 0, sumY = 0;
+                        foreach (int idx in clusters[k])
+                        {
+                            double w = candidatePool[idx].Var;
+                            sumW += w;
+                            sumX += candidatePool[idx].Pt[0] * w;
+                            sumY += candidatePool[idx].Pt[1] * w;
+                        }
+                        if (sumW > 0)
+                        {
+                            double nX = sumX / sumW;
+                            double nY = sumY / sumW;
+                            if (Math.Abs(nX - centroids[k][0]) > 1e-5 || Math.Abs(nY - centroids[k][1]) > 1e-5) changed = true;
+                            centroids[k][0] = nX;
+                            centroids[k][1] = nY;
+                        }
+                    }
+                    if (!changed) break;
+                }
+
                 var initialBatch = new List<int>();
                 for (int k = 0; k < K; k++)
                 {
@@ -688,56 +1434,119 @@ namespace FieldScanNew.ViewModels
                 var finalPoints = new List<(float X, float Y)>();
                 var currentXObs = xObs.ToList();
                 var currentYObs = yObs.ToList();
+                double gridMinAllowedDist = 1.6;
 
-                // 引入归一化欧氏距离防聚集策略
-                // 由于 xStep 和 yStep 可能相差较大（长方形网格或异构扫描参数）
-                // 我们在计算距离时，将实际物理坐标映射到 [0, Nx-1] 和 [0, Ny-1] 的“网格索引空间”中。
-                // 这样，无论 X/Y 物理距离拉伸比例如何，我们都能确保各方向的聚集考量是均等的。
-                // 只要两点在网格中的索引距离小于阈值（例如 1.5 个网格对角线），就认为它们发生了信息聚集。
-                double gridMinAllowedDist = 1.6; // 阈值设定为 1.6 个网格单位，覆盖八邻域防聚集
-
-                foreach (int idx in initialBatch)
+                // 保留原始费时链路：对每个WKMC代表点都基于“当前已选样本”重新拟合并重算候选方差
+                var repPoints = initialBatch.Select(idx => candidatePool[idx].Pt).ToList();
+                foreach (var repPt in repPoints)
                 {
-                    var cPt = candidatePool[idx];
+                    if (candidatePool.Count == 0) break;
+
+                    var repPreds = new double[candidatePool.Count][];
+                    for (int i = 0; i < candidatePool.Count; i++) repPreds[i] = new double[kernels.Count];
+                    for (int k = 0; k < kernels.Count; k++)
+                    {
+                        var model = new RbfInterpolator(currentXObs.ToArray(), currentYObs.ToArray(), kernels[k], 5);
+                        for (int i = 0; i < candidatePool.Count; i++) repPreds[i][k] = model.Predict(candidatePool[i].Pt);
+                    }
+
+                    for (int i = 0; i < candidatePool.Count; i++)
+                    {
+                        double meanDyn = repPreds[i].Average();
+                        double varDyn = repPreds[i].Sum(p => Math.Pow(p - meanDyn, 2)) / repPreds[i].Length;
+                        candidatePool[i] = (candidatePool[i].Pt, varDyn, meanDyn);
+                    }
+
+                    // 保留WKMC语义：以簇代表点为中心，在其邻域里挑重算后方差最大的点
+                    var nearCandidates = candidatePool
+                        .Select((c, i) => new { Item = c, Index = i, DistSq = Math.Pow(c.Pt[0] - repPt[0], 2) + Math.Pow(c.Pt[1] - repPt[1], 2) })
+                        .OrderBy(x => x.DistSq)
+                        .Take(Math.Max(1, candidatePool.Count / Math.Max(1, K)))
+                        .OrderByDescending(x => x.Item.Var)
+                        .ToList();
+
+                    if (nearCandidates.Count == 0) continue;
+                    var chosen = nearCandidates[0];
+                    var cPt = chosen.Item;
 
                     if (finalPoints.Count > 0)
                     {
-                         bool isTooClose = false;
-                         // 将该候选点的物理坐标转换到虚拟网格坐标 (Grid Index)
-                         double cGridX = xStep > 0 ? (cPt.Pt[0] - hyperParams.X_min) / xStep : 0;
-                         double cGridY = yStep > 0 ? (cPt.Pt[1] - hyperParams.Y_min) / yStep : 0;
-
-                         foreach (var fp in finalPoints)
-                         {
-                              // 同理，将 finalPoints 中已采用的物理坐标转换为虚拟网格坐标
-                              double fpGridX = xStep > 0 ? (fp.X - hyperParams.X_min) / xStep : 0;
-                              double fpGridY = yStep > 0 ? (fp.Y - hyperParams.Y_min) / yStep : 0;
-                              
-                              // 在无量纲的网格空间求欧式距离（网格索引距离）
-                              double gridDist = Math.Sqrt(Math.Pow(fpGridX - cGridX, 2) + Math.Pow(fpGridY - cGridY, 2));
-
-                              // 如果距离小于设定的防聚集阈值（即它们挤在了很近的网格圈内）
-                              if (gridDist < gridMinAllowedDist)
-                              {
-                                  isTooClose = true;
-                                  break;
-                              }
-                         }
-
-                         // 若太近，发生过聚集，则放弃这个点，直接判断下一个批候选点
-                         if (isTooClose) continue;
+                        bool isTooClose = false;
+                        double cGridX = xStep > 0 ? (cPt.Pt[0] - hyperParams.X_min) / xStep : 0;
+                        double cGridY = yStep > 0 ? (cPt.Pt[1] - hyperParams.Y_min) / yStep : 0;
+                        foreach (var fp in finalPoints)
+                        {
+                            double fpGridX = xStep > 0 ? (fp.X - hyperParams.X_min) / xStep : 0;
+                            double fpGridY = yStep > 0 ? (fp.Y - hyperParams.Y_min) / yStep : 0;
+                            double gridDist = Math.Sqrt(Math.Pow(fpGridX - cGridX, 2) + Math.Pow(fpGridY - cGridY, 2));
+                            if (gridDist < gridMinAllowedDist)
+                            {
+                                isTooClose = true;
+                                break;
+                            }
+                        }
+                        if (isTooClose)
+                        {
+                            candidatePool.RemoveAt(chosen.Index);
+                            continue;
+                        }
                     }
 
-                    // 空间聚集验证通过，加入确定的采样批次中
                     finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
                     currentXObs.Add(cPt.Pt);
                     currentYObs.Add(cPt.Mean);
+                    candidatePool.RemoveAt(chosen.Index);
+                }
+
+                // 兜底：若代表点筛选后还没选满，从剩余候选继续“重算+双层EVC”补齐
+                while (finalPoints.Count < K && candidatePool.Count > 0)
+                {
+                    var repPreds = new double[candidatePool.Count][];
+                    for (int i = 0; i < candidatePool.Count; i++) repPreds[i] = new double[kernels.Count];
+                    for (int k = 0; k < kernels.Count; k++)
+                    {
+                        var model = new RbfInterpolator(currentXObs.ToArray(), currentYObs.ToArray(), kernels[k], 5);
+                        for (int i = 0; i < candidatePool.Count; i++) repPreds[i][k] = model.Predict(candidatePool[i].Pt);
+                    }
+
+                    for (int i = 0; i < candidatePool.Count; i++)
+                    {
+                        double meanDyn = repPreds[i].Average();
+                        double varDyn = repPreds[i].Sum(p => Math.Pow(p - meanDyn, 2)) / repPreds[i].Length;
+                        candidatePool[i] = (candidatePool[i].Pt, varDyn, meanDyn);
+                    }
+
+                    int bestDynIdx = candidatePool.Select((c, i) => new { c.Var, Idx = i }).OrderByDescending(x => x.Var).First().Idx;
+                    var cPt = candidatePool[bestDynIdx];
+
+                    bool isTooClose = false;
+                    if (finalPoints.Count > 0)
+                    {
+                        double cGridX = xStep > 0 ? (cPt.Pt[0] - hyperParams.X_min) / xStep : 0;
+                        double cGridY = yStep > 0 ? (cPt.Pt[1] - hyperParams.Y_min) / yStep : 0;
+                        foreach (var fp in finalPoints)
+                        {
+                            double fpGridX = xStep > 0 ? (fp.X - hyperParams.X_min) / xStep : 0;
+                            double fpGridY = yStep > 0 ? (fp.Y - hyperParams.Y_min) / yStep : 0;
+                            double gridDist = Math.Sqrt(Math.Pow(fpGridX - cGridX, 2) + Math.Pow(fpGridY - cGridY, 2));
+                            if (gridDist < gridMinAllowedDist) { isTooClose = true; break; }
+                        }
+                    }
+
+                    if (!isTooClose)
+                    {
+                        finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
+                        currentXObs.Add(cPt.Pt);
+                        currentYObs.Add(cPt.Mean);
+                    }
+
+                    candidatePool.RemoveAt(bestDynIdx);
                 }
 
                 if (finalPoints.Count == 0 && initialBatch.Count > 0)
                 {
-                     var cPt = candidatePool[initialBatch[0]];
-                     finalPoints.Add(((float)cPt.Pt[0], (float)cPt.Pt[1]));
+                    var fallback = indexedUnselected.First();
+                    finalPoints.Add(((float)fallback.Pt[0], (float)fallback.Pt[1]));
                 }
 
                 return new QbcOutputData { Status = "success", Message = "Calculated", NextPoints = finalPoints, ClusterCount = K };
