@@ -490,14 +490,11 @@ namespace FieldScanNew.ViewModels
             int maxN = scanSettings.NumX * scanSettings.NumY;
             int defaultLimit = Math.Max(6, (int)Math.Ceiling(maxN * 0.30));
             defaultLimit = Math.Min(defaultLimit, maxN);
-            var countDialog = new InputDialog($"请输入单点QBC总采样点上限（1-{maxN}）:", defaultLimit.ToString());
-            if (countDialog.ShowDialog() != true) return;
-            if (!int.TryParse(countDialog.Answer, out int sampleLimit))
-            {
-                MessageBox.Show("请输入有效整数点数。", "提示");
-                return;
-            }
-            sampleLimit = Math.Max(1, Math.Min(sampleLimit, maxN));
+            double inputInitRatio = 0.1;
+            var paramsDialog = new SparseQbcParamsDialog("单点QBC", maxN, defaultLimit, inputInitRatio);
+            if (paramsDialog.ShowDialog() != true) return;
+            int sampleLimit = paramsDialog.SampleLimitVal;
+            inputInitRatio = paramsDialog.InitRatioVal;
 
             UpdatePlotBackground();
             try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
@@ -552,7 +549,8 @@ namespace FieldScanNew.ViewModels
                     bool isFullHeaderWritten = false;
                     var sampledPoints = new List<SampledPoint>();
 
-                    int initCount = Math.Min(sampleLimit, Math.Max(4, Math.Min(6, maxN)));
+                    int initCount = Math.Max(4, (int)Math.Round(maxN * inputInitRatio));
+                    initCount = Math.Min(initCount, sampleLimit);
                     var allGridPoints = BuildGridPoints(scanSettings);
                     var initPoints = SelectGreedySamplePoints(allGridPoints, scanSettings.NumX, scanSettings.NumY, initCount)
                         .OrderBy(p => Math.Round(p.Y, 3))
@@ -716,14 +714,11 @@ namespace FieldScanNew.ViewModels
             int maxN = scanSettings.NumX * scanSettings.NumY;
             int defaultLimit = Math.Max(8, (int)Math.Ceiling(maxN * 0.40));
             defaultLimit = Math.Min(defaultLimit, maxN);
-            var countDialog = new InputDialog($"请输入Batch-QBC总采样点上限（1-{maxN}）:", defaultLimit.ToString());
-            if (countDialog.ShowDialog() != true) return;
-            if (!int.TryParse(countDialog.Answer, out int sampleLimit))
-            {
-                MessageBox.Show("请输入有效整数点数。", "提示");
-                return;
-            }
-            sampleLimit = Math.Max(1, Math.Min(sampleLimit, maxN));
+            double inputInitRatio = 0.1;
+            var paramsDialog = new SparseQbcParamsDialog("Batch-QBC", maxN, defaultLimit, inputInitRatio);
+            if (paramsDialog.ShowDialog() != true) return;
+            int sampleLimit = paramsDialog.SampleLimitVal;
+            inputInitRatio = paramsDialog.InitRatioVal;
 
             UpdatePlotBackground();
             try { await _hardwareService.ActiveDevice.ConnectAsync(CurrentInstrumentSettings); }
@@ -778,7 +773,8 @@ namespace FieldScanNew.ViewModels
                     bool isFullHeaderWritten = false;
                     var sampledPoints = new List<SampledPoint>();
 
-                    int initCount = Math.Min(sampleLimit, Math.Max(4, Math.Min(8, maxN)));
+                    int initCount = Math.Max(4, (int)Math.Round(maxN * inputInitRatio));
+                    initCount = Math.Min(initCount, sampleLimit);
                     var allGridPoints = BuildGridPoints(scanSettings);
                     var initPoints = SelectGreedySamplePoints(allGridPoints, scanSettings.NumX, scanSettings.NumY, initCount)
                         .OrderBy(p => Math.Round(p.Y, 3))
