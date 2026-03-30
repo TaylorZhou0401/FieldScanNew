@@ -25,6 +25,7 @@ namespace FieldScanNew.ViewModels
         // ==========================================
         // RobotId 属性：用于前端修改和显示
         // ==========================================
+        private int _robotId = 19;
         public int RobotId
         {
             get
@@ -33,15 +34,16 @@ namespace FieldScanNew.ViewModels
                 {
                     return robot.RobotId;
                 }
-                return 19; // 默认值
+                return _robotId; // 默认值
             }
             set
             {
+                _robotId = value;
                 if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
                 {
                     robot.RobotId = value;
-                    OnPropertyChanged();
                 }
+                OnPropertyChanged();
             }
         }
 
