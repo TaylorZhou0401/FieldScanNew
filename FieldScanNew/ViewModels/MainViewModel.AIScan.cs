@@ -55,6 +55,7 @@ namespace FieldScanNew.ViewModels
 
         public enum RbfKernel { Linear, Cubic, ThinPlateSpline, Quintic }
 
+        #region AI扫描 (QDS-AL扫描)
         private async Task QBCExecuteStartScan()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -473,7 +474,9 @@ namespace FieldScanNew.ViewModels
                 IsScanning = false;
             }
         }
+        #endregion
 
+        #region 单点QBC
         private async Task QBCExecuteSinglePointScan()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -697,7 +700,9 @@ namespace FieldScanNew.ViewModels
                 IsScanning = false;
             }
         }
+        #endregion
 
+        #region Batch-QBC (常规批采样)
         private async Task QBCExecuteBatchFixedScan()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -923,6 +928,7 @@ namespace FieldScanNew.ViewModels
                 IsScanning = false;
             }
         }
+        #endregion
 
         /// <summary>
         /// 记录全频谱轨迹数据到 StringBuilder
@@ -1141,11 +1147,11 @@ namespace FieldScanNew.ViewModels
                 // 目标：只评估候选点邻域内方差收益，避免全局重复计算，并沿用 V_low 判据。
                 var rankedCandidates = candidatePool.OrderByDescending(c => c.Var).ToList();
 
-                // 保守参数：邻域略大、衰减较温和、V_low 阈值略提高以提升稳健性
-                double localRadiusGrid = 2.4;
-                double decayAlpha = 0.35;
+                // 加强参数：增大防聚集邻域半径、增强方差衰减惩罚、提高 V_low 门控阈值
+                double localRadiusGrid = 3.5;
+                double decayAlpha = 0.80;
                 double avgCandidateVar = rankedCandidates.Count > 0 ? rankedCandidates.Average(c => c.Var) : 0.0;
-                double V_low = Math.Max(minVarThreshold * 1.20, avgCandidateVar * 0.70);
+                double V_low = Math.Max(minVarThreshold * 1.50, avgCandidateVar * 0.85);
 
                 int candCount = rankedCandidates.Count;
                 var candGridX = new double[candCount];
@@ -1698,6 +1704,13 @@ namespace FieldScanNew.ViewModels
             double[][] xObs = sampledPoints.Select(p => new[] { (double)p.X, (double)p.Y }).ToArray();
             // 预测全场热力图时，同样按线性域拟合，保证最后呈现的热力图与逻辑一致
             double[] yObs = sampledPoints.Select(p => Math.Pow(10, p.Magnitude / 20.0)).ToArray();
+            
+            // --- 提取极差供权重约束使用 ---
+            double yMaxObs = yObs.Length > 0 ? yObs.Max() : 1.0;
+            double yMinObs = yObs.Length > 0 ? yObs.Min() : 0.0;
+            double fieldRange = Math.Max(yMaxObs - yMinObs, 1e-6);
+            double tau = fieldRange * 0.2; // 稳健衰减参数
+
             var kernels = new List<RbfKernel> { RbfKernel.Linear, RbfKernel.Cubic, RbfKernel.ThinPlateSpline, RbfKernel.Quintic };
             var rbfModels = new List<RbfInterpolator>();
             foreach (var kernel in kernels) rbfModels.Add(new RbfInterpolator(xObs, yObs, kernel, 5));
@@ -1715,9 +1728,52 @@ namespace FieldScanNew.ViewModels
                     {
                         double[] predictions = new double[rbfModels.Count];
                         for (int k = 0; k < rbfModels.Count; k++) predictions[k] = rbfModels[k].Predict(new[] { (double)targetX, targetY });
-                        double meanVal_lin = predictions.Average();
-                        // 线性预测值转换回 dB 用于热力图显示
-                        double meanVal_dB = 20 * Math.Log10(Math.Max(meanVal_lin, 1e-12));
+                        
+                        // --- 局部变异加权法 ---
+                        var sortedPreds = predictions.OrderBy(v => v).ToArray();
+                        double median = (sortedPreds[1] + sortedPreds[2]) / 2.0; 
+                        
+                        // 1. 过滤离散飞点
+                        for (int k = 0; k < predictions.Length; k++)
+                        {
+                            if (Math.Abs(predictions[k] - median) > fieldRange * 1.5)
+                                predictions[k] = double.NaN;
+                        }
+
+                        // 2. 计算有效点标准差(方差度代理)
+                        var validPreds = predictions.Where(p => !double.IsNaN(p)).ToArray();
+                        double localStdDev = 0;
+                        if (validPreds.Length > 1)
+                        {
+                            double m = validPreds.Average();
+                            localStdDev = Math.Sqrt(validPreds.Sum(v => Math.Pow(v - m, 2)) / (validPreds.Length - 1));
+                        }
+
+                        // 3. 计算稳健因子alpha与各核权重 (0:Lin, 1:Cub, 2:TPS, 3:Qui)
+                        double alpha = Math.Exp(-localStdDev / tau);
+                        double w_Linear  = !double.IsNaN(predictions[0]) ? (1.0 - alpha) : 0;
+                        double w_Cubic   = !double.IsNaN(predictions[1]) ? alpha : 0;
+                        double w_TPS     = !double.IsNaN(predictions[2]) ? (1.0 - alpha) : 0;
+                        double w_Quintic = !double.IsNaN(predictions[3]) ? alpha : 0;
+
+                        double totalWeight = w_Linear + w_Cubic + w_TPS + w_Quintic;
+                        double meanVal_lin;
+
+                        if (totalWeight < 1e-9 || validPreds.Length == 0)
+                        {
+                            meanVal_lin = median; // 权重失效时兜底
+                        }
+                        else
+                        {
+                            meanVal_lin = (w_Linear * (double.IsNaN(predictions[0]) ? 0 : predictions[0]) +
+                                           w_Cubic * (double.IsNaN(predictions[1]) ? 0 : predictions[1]) +
+                                           w_TPS * (double.IsNaN(predictions[2]) ? 0 : predictions[2]) +
+                                           w_Quintic * (double.IsNaN(predictions[3]) ? 0 : predictions[3])) / totalWeight;
+                        }
+                        
+                        // 线性预测值转换回 dB 用于热力图显示，并引入全局数值防爆约束
+                        meanVal_lin = Math.Min(Math.Max(meanVal_lin, 1e-12), yMaxObs + fieldRange * 2);
+                        double meanVal_dB = 20 * Math.Log10(meanVal_lin);
                         filledData[i, j] = meanVal_dB; fullPointMap[key] = meanVal_dB;
                     }
                 }
