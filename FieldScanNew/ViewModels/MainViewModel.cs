@@ -97,7 +97,7 @@ namespace FieldScanNew.ViewModels
         public ICommand GreedySampleScanCommand { get; }
         public ICommand StopScanCommand { get; }
 
-        // 通过修改此布尔值来一键控制四种高级采样算法在前端界面的显示与隐藏
+        // 采样开关：通过修改此布尔值来一键控制四种高级采样算法在前端界面的显示与隐藏，false为默认值，隐藏；true则显示
         private bool _showAdvancedScanMethods = false;
         public Visibility AdvancedScanVisibility => _showAdvancedScanMethods ? Visibility.Visible : Visibility.Collapsed;
 
