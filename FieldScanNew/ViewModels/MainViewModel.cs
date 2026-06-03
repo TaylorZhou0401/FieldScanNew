@@ -97,6 +97,10 @@ namespace FieldScanNew.ViewModels
         public ICommand GreedySampleScanCommand { get; }
         public ICommand StopScanCommand { get; }
 
+        // 采样开关：通过修改此布尔值来一键控制四种高级采样算法在前端界面的显示与隐藏，false为默认值，隐藏；true则显示
+        private bool _showAdvancedScanMethods = false;
+        public Visibility AdvancedScanVisibility => _showAdvancedScanMethods ? Visibility.Visible : Visibility.Collapsed;
+
         public MainViewModel()
         {
             _dialogService = new DialogService();
@@ -230,6 +234,7 @@ namespace FieldScanNew.ViewModels
             return startFreq + (double)index * (stopFreq - startFreq) / (totalPoints - 1);
         }
 
+        #region 标准扫描 (全扫描)
         private async Task ExecuteStartScan()
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -387,7 +392,9 @@ namespace FieldScanNew.ViewModels
                 IsScanning = false;
             }
         }
+        #endregion
 
+        #region 稀疏采样扫描 (随机采样 / 贪婪采样)
         private async Task ExecuteSparseSampleScan(bool useGreedySampling)
         {
             if (_hardwareService.ActiveRobot == null || !_hardwareService.ActiveRobot.IsConnected ||
@@ -584,6 +591,7 @@ namespace FieldScanNew.ViewModels
                 IsScanning = false;
             }
         }
+        #endregion
 
         private static List<(float X, float Y)> BuildGridPoints(ScanSettings scanSettings)
         {
