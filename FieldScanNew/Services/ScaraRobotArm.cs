@@ -29,7 +29,7 @@ namespace FieldScanNew.Services
 
                 for (int i = 0; i < 10; i++)
                 {
-                    Thread.Sleep(500);
+                    Thread.Sleep(1000);
                     if (_robot.is_connected()) break;
                     if (i == 9) throw new TimeoutException("连接机器人超时！");
                 }

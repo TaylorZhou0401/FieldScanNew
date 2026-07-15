@@ -23,7 +23,7 @@
                     <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AvailableRobots}" SelectedItem="{Binding SelectedRobot}" Margin="5"/>
                     
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="机械臂 ID:" VerticalAlignment="Center" Margin="5"/>
-                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding RobotId, UpdateSourceTrigger=PropertyChanged}" Margin="5" ToolTip="请输入机械臂ID (即机械臂IP地址主机号)"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding RobotId}" Margin="5" ToolTip="请输入机械臂ID (即机械臂IP地址主机号)"/>
                 </Grid>
                 <TextBlock Margin="5,10,5,5">
                     <Run Text="状态:"/>

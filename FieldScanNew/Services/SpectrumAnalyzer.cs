@@ -1,6 +1,7 @@
 ﻿using FieldScanNew.Models;
 using Ivi.Visa;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -13,18 +14,32 @@ namespace FieldScanNew.Services
     {
         Keysight, // Agilent / HP
         RohdeSchwarz,
+        RohdeSchwarzFsh,
         Rigol,
         Unknown
     }
 
     public class SpectrumAnalyzer : IMeasurementDevice
     {
-        public string DeviceName => "Spectrum Analyzer (VISA)";
+        public string DeviceName => IsRohdeSchwarzFsh ? "R&S FSH8 (VISA)" : "Spectrum Analyzer (VISA)";
         public bool IsConnected { get; private set; } = false;
         private IMessageBasedSession? _saSession;
+        private readonly AnalyzerBrand _preferredBrand;
 
         // 新增：当前识别到的品牌
         private AnalyzerBrand _currentBrand = AnalyzerBrand.Unknown;
+
+        public SpectrumAnalyzer(AnalyzerBrand preferredBrand = AnalyzerBrand.Unknown)
+        {
+            _preferredBrand = preferredBrand;
+            _currentBrand = preferredBrand;
+        }
+
+        private bool IsRohdeSchwarz =>
+            _currentBrand == AnalyzerBrand.RohdeSchwarz ||
+            _currentBrand == AnalyzerBrand.RohdeSchwarzFsh;
+
+        private bool IsRohdeSchwarzFsh => _currentBrand == AnalyzerBrand.RohdeSchwarzFsh;
 
         public async Task ConnectAsync(InstrumentSettings settings)
         {
@@ -34,11 +49,7 @@ namespace FieldScanNew.Services
             {
                 try
                 {
-                    string visaAddress = $"TCPIP0::{settings.IpAddress}::inst0::INSTR";
-                    var visaSession = GlobalResourceManager.Open(visaAddress);
-                    _saSession = visaSession as IMessageBasedSession;
-
-                    if (_saSession == null) throw new Exception("无法创建VISA会话。");
+                    _saSession = OpenVisaSession(settings);
 
                     _saSession.TimeoutMilliseconds = 3000;
                     _saSession.TerminationCharacterEnabled = true;
@@ -50,12 +61,17 @@ namespace FieldScanNew.Services
                     string idn = _saSession.FormattedIO.ReadLine().ToUpper();
 
                     // 2. 识别品牌 (简单逻辑)
-                    if (idn.Contains("KEYSIGHT") || idn.Contains("AGILENT") || idn.Contains("HP"))
+                    if (idn.Contains("FSH8") || idn.Contains("FSH 8") || idn.Contains("FSH-8") ||
+                        (idn.Contains("ROHDE") && idn.Contains("SCHWARZ") && idn.Contains("FSH")))
+                        _currentBrand = AnalyzerBrand.RohdeSchwarzFsh;
+                    else if (idn.Contains("KEYSIGHT") || idn.Contains("AGILENT") || idn.Contains("HP"))
                         _currentBrand = AnalyzerBrand.Keysight;
                     else if (idn.Contains("ROHDE") && idn.Contains("SCHWARZ"))
                         _currentBrand = AnalyzerBrand.RohdeSchwarz;
                     else if (idn.Contains("RIGOL"))
                         _currentBrand = AnalyzerBrand.Rigol;
+                    else if (_preferredBrand != AnalyzerBrand.Unknown)
+                        _currentBrand = _preferredBrand;
                     else
                         _currentBrand = AnalyzerBrand.Keysight; // 默认尝试按 Keysight 处理
 
@@ -64,13 +80,16 @@ namespace FieldScanNew.Services
                     _saSession.FormattedIO.WriteLine(string.Format(CultureInfo.InvariantCulture, ":FREQ:SPAN {0}", settings.SpanHz));
 
                     // 差异化指令：参考电平
-                    if (_currentBrand == AnalyzerBrand.RohdeSchwarz)
+                    if (IsRohdeSchwarz)
                         _saSession.FormattedIO.WriteLine(string.Format(CultureInfo.InvariantCulture, ":DISP:TRAC:Y:RLEV {0}", settings.ReferenceLevelDb));
                     else
                         _saSession.FormattedIO.WriteLine(string.Format(CultureInfo.InvariantCulture, ":DISP:WIND:TRAC:Y:RLEV {0}", settings.ReferenceLevelDb));
 
-                    if (settings.Points > 0)
+                    if (settings.Points > 0 && !IsRohdeSchwarzFsh)
                         _saSession.FormattedIO.WriteLine($":SWE:POIN {settings.Points}");
+
+                    if (IsRohdeSchwarzFsh)
+                        _saSession.FormattedIO.WriteLine(":UNIT:POW DBM");
 
                     // 带宽设置
                     if (settings.RbwHz > 0)
@@ -100,6 +119,56 @@ namespace FieldScanNew.Services
                     throw new Exception($"连接失败: {ex.Message}");
                 }
             });
+        }
+
+        private IMessageBasedSession OpenVisaSession(InstrumentSettings settings)
+        {
+            Exception? lastException = null;
+
+            foreach (var visaAddress in GetVisaAddressCandidates(settings))
+            {
+                object? visaSession = null;
+                try
+                {
+                    visaSession = GlobalResourceManager.Open(visaAddress);
+                    if (visaSession is IMessageBasedSession messageBasedSession)
+                        return messageBasedSession;
+
+                    if (visaSession is IDisposable disposableSession)
+                        disposableSession.Dispose();
+
+                    lastException = new Exception($"无法创建VISA消息会话: {visaAddress}");
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        if (visaSession is IDisposable disposableSession)
+                            disposableSession.Dispose();
+                    }
+                    catch { }
+                    lastException = ex;
+                }
+            }
+
+            throw new Exception(lastException?.Message ?? "无法创建VISA会话。");
+        }
+
+        private IEnumerable<string> GetVisaAddressCandidates(InstrumentSettings settings)
+        {
+            string ipAddress = settings.IpAddress;
+
+            if (_preferredBrand == AnalyzerBrand.RohdeSchwarzFsh)
+            {
+                yield return $"TCPIP::{ipAddress}";
+                yield return $"TCPIP0::{ipAddress}::INSTR";
+                yield return $"TCPIP0::{ipAddress}::inst0::INSTR";
+                yield break;
+            }
+
+            yield return $"TCPIP0::{ipAddress}::inst0::INSTR";
+            yield return $"TCPIP0::{ipAddress}::INSTR";
+            yield return $"TCPIP::{ipAddress}";
         }
 
         public void Disconnect()
@@ -146,6 +215,10 @@ namespace FieldScanNew.Services
                     {
                         // R&S 通常用 TRAC? TRACE1
                         formattedIO.WriteLine(":TRAC? TRACE1");
+                    }
+                    else if (IsRohdeSchwarzFsh)
+                    {
+                        formattedIO.WriteLine(":TRAC:DATA? TRACE1");
                     }
                     else
                     {

@@ -13,6 +13,9 @@ namespace FieldScanNew.ViewModels
     {
         public string DisplayName => "1. 仪器连接";
 
+        private const string Fsh8DeviceName = "R&S FSH8 (VISA)";
+        private const string GenericSpectrumAnalyzerName = "Spectrum Analyzer (VISA)";
+
         private readonly HardwareService _hardwareService;
 
         private InstrumentSettings _instrumentSettings;
@@ -25,6 +28,7 @@ namespace FieldScanNew.ViewModels
         // ==========================================
         // RobotId 属性：用于前端修改和显示
         // ==========================================
+        private int _robotId = 19;
         public int RobotId
         {
             get
@@ -33,15 +37,16 @@ namespace FieldScanNew.ViewModels
                 {
                     return robot.RobotId;
                 }
-                return 19; // 默认值
+                return _robotId; // 默认值
             }
             set
             {
+                _robotId = value;
                 if (_hardwareService.ActiveRobot is ScaraRobotArm robot)
                 {
                     robot.RobotId = value;
-                    OnPropertyChanged();
                 }
+                OnPropertyChanged();
             }
         }
 
@@ -63,7 +68,7 @@ namespace FieldScanNew.ViewModels
         private string _selectedRobot = "慧灵科技 Z-Arm 2442";
         public string SelectedRobot { get => _selectedRobot; set { _selectedRobot = value; OnPropertyChanged(); } }
 
-        private string _selectedDevice = "Spectrum Analyzer (VISA)";
+        private string _selectedDevice = Fsh8DeviceName;
         public string SelectedDevice { get => _selectedDevice; set { _selectedDevice = value; OnPropertyChanged(); } }
 
         public ICommand ConnectRobotCommand { get; }
@@ -81,7 +86,7 @@ namespace FieldScanNew.ViewModels
             // 关键修复：恢复列表初始化
             // ==========================================
             AvailableRobots = new ObservableCollection<string> { "慧灵科技 Z-Arm 2442" };
-            AvailableDevices = new ObservableCollection<string> { "Spectrum Analyzer (VISA)" };
+            AvailableDevices = new ObservableCollection<string> { Fsh8DeviceName, GenericSpectrumAnalyzerName };
 
             ConnectRobotCommand = new RelayCommand(async _ => await ExecuteConnectRobot(), _ => !IsConnecting);
             DisconnectRobotCommand = new RelayCommand(_ => ExecuteDisconnectRobot(), _ => !IsConnecting);
@@ -149,7 +154,8 @@ namespace FieldScanNew.ViewModels
             {
                 IMeasurementDevice device = SelectedDevice switch
                 {
-                    "Spectrum Analyzer (VISA)" => new SpectrumAnalyzer(),
+                    Fsh8DeviceName => new SpectrumAnalyzer(AnalyzerBrand.RohdeSchwarzFsh),
+                    GenericSpectrumAnalyzerName => new SpectrumAnalyzer(),
                     _ => throw new NotImplementedException($"仪器 '{SelectedDevice}' 不支持。")
                 };
                 _hardwareService.SetActiveDevice(device);
